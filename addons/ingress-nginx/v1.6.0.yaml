@@ -224,7 +224,8 @@ metadata:
   labels:
     k8s-addon: ingress-nginx.addons.k8s.io
 data:
-  use-proxy-protocol: "true"
+  # use-proxy-protocol: "true"
+  use-proxy-protocol: "false"
 
 ---
 
@@ -235,19 +236,22 @@ metadata:
   namespace: kube-ingress
   labels:
     k8s-addon: ingress-nginx.addons.k8s.io
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-proxy-protocol: '*'
+    # annotations:
+    #   service.beta.kubernetes.io/aws-load-balancer-proxy-protocol: '*'
 spec:
-  type: LoadBalancer
+  # type: LoadBalancer
+  type: NodePort
   selector:
     app: ingress-nginx
   ports:
   - name: http
     port: 80
     targetPort: http
+    nodePort: 30080
   - name: https
     port: 443
     targetPort: https
+    nodePort: 30443
 
 ---
 
@@ -309,5 +313,5 @@ spec:
         - /nginx-ingress-controller
         - --default-backend-service=$(POD_NAMESPACE)/nginx-default-backend
         - --configmap=$(POD_NAMESPACE)/ingress-nginx
-        - --publish-service=$(POD_NAMESPACE)/ingress-nginx
+        # - --publish-service=$(POD_NAMESPACE)/ingress-nginx
         - --annotations-prefix=ingress.kubernetes.io
