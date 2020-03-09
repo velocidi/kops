@@ -183,6 +183,9 @@ metadata:
     k8s-addon: ingress-nginx.addons.k8s.io
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-default-backend
   revisionHistoryLimit: 10
   template:
     metadata:
@@ -265,6 +268,9 @@ metadata:
     k8s-addon: ingress-nginx.addons.k8s.io
 spec:
   replicas: 3
+  selector:
+    matchLabels:
+      app: ingress-nginx
   template:
     metadata:
       labels:
