@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/upup/pkg/fi"
 )
 
 func TestSetClusterFields(t *testing.T) {
@@ -32,16 +33,31 @@ func TestSetClusterFields(t *testing.T) {
 		{
 			Fields: []string{
 				"spec.kubernetesVersion=1.8.2",
+				"spec.kubelet.authorizationMode=Webhook",
+				"spec.kubelet.authenticationTokenWebhook=true",
+			},
+			Input: kops.Cluster{
+				Spec: kops.ClusterSpec{
+					Kubelet: &kops.KubeletConfigSpec{},
+				},
 			},
 			Output: kops.Cluster{
-				Spec: kops.ClusterSpec{KubernetesVersion: "1.8.2"},
+				Spec: kops.ClusterSpec{
+					KubernetesVersion: "1.8.2",
+					Kubelet: &kops.KubeletConfigSpec{
+						AuthorizationMode:          "Webhook",
+						AuthenticationTokenWebhook: fi.Bool(true),
+					},
+				},
 			},
 		},
 	}
 
 	for _, g := range grid {
+		var igs []*kops.InstanceGroup
 		c := g.Input
-		err := setClusterFields(g.Fields, &c)
+
+		err := SetClusterFields(g.Fields, &c, igs)
 		if err != nil {
 			t.Errorf("unexpected error from setClusterFields %v: %v", g.Fields, err)
 			continue

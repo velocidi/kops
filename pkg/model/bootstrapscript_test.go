@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,13 +17,12 @@ limitations under the License.
 package model
 
 import (
-	"io/ioutil"
 	"strings"
 	"testing"
 
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/nodeup"
-	"k8s.io/kops/pkg/diff"
+	"k8s.io/kops/pkg/testutils/golden"
 )
 
 func Test_ProxyFunc(t *testing.T) {
@@ -142,16 +141,7 @@ func TestBootstrapUserData(t *testing.T) {
 			continue
 		}
 
-		expectedBytes, err := ioutil.ReadFile(x.ExpectedFilePath)
-		if err != nil {
-			t.Fatalf("unexpected error reading ExpectedFilePath %q: %v", x.ExpectedFilePath, err)
-		}
-
-		if actual != string(expectedBytes) {
-			diffString := diff.FormatDiff(string(expectedBytes), actual)
-			t.Errorf("case %d failed, actual output differed from expected (%s).", i, x.ExpectedFilePath)
-			t.Logf("diff:\n%s\n", diffString)
-		}
+		golden.AssertMatchesFile(t, actual, x.ExpectedFilePath)
 	}
 }
 
@@ -190,6 +180,10 @@ func makeTestCluster(hookSpecRoles []kops.InstanceGroupRole, fileAssetSpecRoles 
 			NetworkCIDR: "10.79.0.0/24",
 			CloudConfig: &kops.CloudConfiguration{
 				NodeTags: s("something"),
+			},
+			ContainerRuntime: "docker",
+			Containerd: &kops.ContainerdConfig{
+				LogLevel: s("info"),
 			},
 			Docker: &kops.DockerConfig{
 				LogLevel: s("INFO"),

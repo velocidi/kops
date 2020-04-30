@@ -12,13 +12,12 @@ go_library(
         "utilities.go",
         "win_event_handler.go",
     ],
-    importmap = "vendor/github.com/Azure/go-ansiterm/winterm",
+    importmap = "k8s.io/kops/vendor/github.com/Azure/go-ansiterm/winterm",
     importpath = "github.com/Azure/go-ansiterm/winterm",
     visibility = ["//visibility:public"],
     deps = select({
         "@io_bazel_rules_go//go/platform:windows": [
             "//vendor/github.com/Azure/go-ansiterm:go_default_library",
-            "//vendor/github.com/sirupsen/logrus:go_default_library",
         ],
         "//conditions:default": [],
     }),

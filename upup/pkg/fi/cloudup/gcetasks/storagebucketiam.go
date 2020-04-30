@@ -19,14 +19,14 @@ package gcetasks
 import (
 	"fmt"
 
-	"github.com/golang/glog"
 	"google.golang.org/api/storage/v1"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
 )
 
-// StorageBucketIam represents an IAM policy on a google cloud storage storage bucket
+// StorageBucketIam represents an IAM policy on a google cloud storage bucket
 //go:generate fitask -type=StorageBucketIam
 type StorageBucketIam struct {
 	Name      *string
@@ -51,7 +51,7 @@ func (e *StorageBucketIam) Find(c *fi.Context) (*StorageBucketIam, error) {
 	entity := fi.StringValue(e.Entity)
 	role := fi.StringValue(e.Role)
 
-	glog.V(2).Infof("Checking GCS IAM policy for gs://%s for %s", bucket, entity)
+	klog.V(2).Infof("Checking GCS IAM policy for gs://%s for %s", bucket, entity)
 	policy, err := cloud.Storage().Buckets.GetIamPolicy(bucket).Do()
 	if err != nil {
 		if gce.IsNotFound(err) {
@@ -138,7 +138,7 @@ func (_ *StorageBucketIam) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Storage
 		policy.Bindings = append(policy.Bindings, binding)
 	}
 
-	glog.V(2).Infof("Setting GCS IAM policy for gs://%s for %s: %s", bucket, entity, role)
+	klog.V(2).Infof("Setting GCS IAM policy for gs://%s for %s: %s", bucket, entity, role)
 
 	if _, err := t.Cloud.Storage().Buckets.SetIamPolicy(bucket, policy).Do(); err != nil {
 		return fmt.Errorf("error setting GCS IAM policy for gs://%s for %s: %v", bucket, entity, err)
@@ -147,10 +147,10 @@ func (_ *StorageBucketIam) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Storage
 	return nil
 }
 
-type terraformStorageBucketIam struct {
-	Bucket     string   `json:"bucket,omitempty"`
-	RoleEntity []string `json:"role_entity,omitempty"`
-}
+// type terraformStorageBucketIam struct {
+// 	Bucket     string   `json:"bucket,omitempty" cty:"bucket"`
+// 	RoleEntity []string `json:"role_entity,omitempty" cty:"role_entity"`
+// }
 
 func (_ *StorageBucketIam) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *StorageBucketIam) error {
 	//var roleEntities []string
@@ -162,6 +162,6 @@ func (_ *StorageBucketIam) RenderTerraform(t *terraform.TerraformTarget, a, e, c
 	//
 	//return t.RenderResource("google_storage_bucket_IAM policy", *e.Name, tf)
 
-	glog.Warningf("terraform does not support GCE IAM policies on GCS buckets; please ensure your service account has access")
+	klog.Warningf("terraform does not support GCE IAM policies on GCS buckets; please ensure your service account has access")
 	return nil
 }

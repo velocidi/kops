@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,7 +28,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/autoscaling"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/elb"
-	"github.com/golang/glog"
+	elbv2 "github.com/aws/aws-sdk-go/service/elbv2"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
 )
 
@@ -60,7 +61,7 @@ func ValidateRegion(region string) error {
 	defer allRegionsMutex.Unlock()
 
 	if allRegions == nil {
-		glog.V(2).Infof("Querying EC2 for all valid regions")
+		klog.V(2).Infof("Querying EC2 for all valid regions")
 
 		request := &ec2.DescribeRegionsInput{}
 		awsRegion := os.Getenv("AWS_REGION")
@@ -72,14 +73,14 @@ func ValidateRegion(region string) error {
 
 		sess, err := session.NewSession(config)
 		if err != nil {
-			return fmt.Errorf("Error starting a new AWS session: %v", err)
+			return fmt.Errorf("error starting a new AWS session: %v", err)
 		}
 
 		client := ec2.New(sess, config)
 
 		response, err := client.DescribeRegions(request)
 		if err != nil {
-			return fmt.Errorf("Got an error while querying for valid regions (verify your AWS credentials?): %v", err)
+			return fmt.Errorf("got an error while querying for valid regions (verify your AWS credentials?): %v", err)
 		}
 		allRegions = response.Regions
 	}
@@ -92,7 +93,7 @@ func ValidateRegion(region string) error {
 	}
 
 	if os.Getenv("SKIP_REGION_CHECK") != "" {
-		glog.Infof("AWS region does not appear to be valid, but skipping because SKIP_REGION_CHECK is set")
+		klog.Infof("AWS region does not appear to be valid, but skipping because SKIP_REGION_CHECK is set")
 		return nil
 	}
 
@@ -113,7 +114,7 @@ func FindRegion(cluster *kops.Cluster) (string, error) {
 
 		zoneRegion := subnet.Zone[:len(subnet.Zone)-1]
 		if region != "" && zoneRegion != region {
-			return "", fmt.Errorf("Clusters cannot span multiple regions (found zone %q, but region is %q)", subnet.Zone, region)
+			return "", fmt.Errorf("error Clusters cannot span multiple regions (found zone %q, but region is %q)", subnet.Zone, region)
 		}
 
 		region = zoneRegion
@@ -144,6 +145,16 @@ func FindASGTag(tags []*autoscaling.TagDescription, key string) (string, bool) {
 
 // FindELBTag find the value of the tag with the specified key
 func FindELBTag(tags []*elb.Tag, key string) (string, bool) {
+	for _, tag := range tags {
+		if key == aws.StringValue(tag.Key) {
+			return aws.StringValue(tag.Value), true
+		}
+	}
+	return "", false
+}
+
+// FindELBV2Tag find the value of the tag with the specified key
+func FindELBV2Tag(tags []*elbv2.Tag, key string) (string, bool) {
 	for _, tag := range tags {
 		if key == aws.StringValue(tag.Key) {
 			return aws.StringValue(tag.Value), true

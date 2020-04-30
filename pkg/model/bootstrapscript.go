@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,12 +22,13 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
 
 	"github.com/ghodss/yaml"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/nodeup"
@@ -60,11 +61,31 @@ func (b *BootstrapScript) KubeEnv(ig *kops.InstanceGroup) (string, error) {
 
 func (b *BootstrapScript) buildEnvironmentVariables(cluster *kops.Cluster) (map[string]string, error) {
 	env := make(map[string]string)
+
+	if os.Getenv("GOSSIP_DNS_CONN_LIMIT") != "" {
+		env["GOSSIP_DNS_CONN_LIMIT"] = os.Getenv("GOSSIP_DNS_CONN_LIMIT")
+	}
+
 	if os.Getenv("S3_ENDPOINT") != "" {
 		env["S3_ENDPOINT"] = os.Getenv("S3_ENDPOINT")
 		env["S3_REGION"] = os.Getenv("S3_REGION")
 		env["S3_ACCESS_KEY_ID"] = os.Getenv("S3_ACCESS_KEY_ID")
 		env["S3_SECRET_ACCESS_KEY"] = os.Getenv("S3_SECRET_ACCESS_KEY")
+	}
+
+	// Pass in required credentials when using user-defined swift endpoint
+	if os.Getenv("OS_AUTH_URL") != "" {
+		for _, envVar := range []string{
+			"OS_TENANT_ID", "OS_TENANT_NAME", "OS_PROJECT_ID", "OS_PROJECT_NAME",
+			"OS_PROJECT_DOMAIN_NAME", "OS_PROJECT_DOMAIN_ID",
+			"OS_DOMAIN_NAME", "OS_DOMAIN_ID",
+			"OS_USERNAME",
+			"OS_PASSWORD",
+			"OS_AUTH_URL",
+			"OS_REGION_NAME",
+		} {
+			env[envVar] = fmt.Sprintf("'%s'", os.Getenv(envVar))
+		}
 	}
 
 	if kops.CloudProviderID(cluster.Spec.CloudProvider) == kops.CloudProviderDO {
@@ -80,9 +101,26 @@ func (b *BootstrapScript) buildEnvironmentVariables(cluster *kops.Cluster) (map[
 			return nil, err
 		}
 		if region == "" {
-			glog.Warningf("unable to determine cluster region")
+			klog.Warningf("unable to determine cluster region")
 		} else {
 			env["AWS_REGION"] = region
+		}
+	}
+
+	if kops.CloudProviderID(cluster.Spec.CloudProvider) == kops.CloudProviderALI {
+		region := os.Getenv("OSS_REGION")
+		if region != "" {
+			env["OSS_REGION"] = os.Getenv("OSS_REGION")
+		}
+
+		aliID := os.Getenv("ALIYUN_ACCESS_KEY_ID")
+		if aliID != "" {
+			env["ALIYUN_ACCESS_KEY_ID"] = os.Getenv("ALIYUN_ACCESS_KEY_ID")
+		}
+
+		aliSecret := os.Getenv("ALIYUN_ACCESS_KEY_SECRET")
+		if aliSecret != "" {
+			env["ALIYUN_ACCESS_KEY_SECRET"] = os.Getenv("ALIYUN_ACCESS_KEY_SECRET")
 		}
 	}
 
@@ -94,7 +132,11 @@ func (b *BootstrapScript) buildEnvironmentVariables(cluster *kops.Cluster) (map[
 func (b *BootstrapScript) ResourceNodeUp(ig *kops.InstanceGroup, cluster *kops.Cluster) (*fi.ResourceHolder, error) {
 	// Bastions can have AdditionalUserData, but if there isn't any skip this part
 	if ig.IsBastion() && len(ig.Spec.AdditionalUserData) == 0 {
-		return nil, nil
+		templateResource, err := NewTemplateResource("nodeup", "", nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		return fi.WrapResource(templateResource), nil
 	}
 
 	functions := template.FuncMap{
@@ -113,9 +155,17 @@ func (b *BootstrapScript) ResourceNodeUp(ig *kops.InstanceGroup, cluster *kops.C
 			if err != nil {
 				return "", err
 			}
+
+			// Sort keys to have a stable sequence of "export xx=xxx"" statements
+			var keys []string
+			for k := range env {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+
 			var b bytes.Buffer
-			for k, v := range env {
-				b.WriteString(fmt.Sprintf("export %s=%s\n", k, v))
+			for _, k := range keys {
+				b.WriteString(fmt.Sprintf("export %s=%s\n", k, env[k]))
 			}
 			return b.String(), nil
 		},
@@ -129,23 +179,43 @@ func (b *BootstrapScript) ResourceNodeUp(ig *kops.InstanceGroup, cluster *kops.C
 
 			spec := make(map[string]interface{})
 			spec["cloudConfig"] = cs.CloudConfig
+			spec["containerRuntime"] = cs.ContainerRuntime
+			spec["containerd"] = cs.Containerd
 			spec["docker"] = cs.Docker
-			spec["kubelet"] = cs.Kubelet
 			spec["kubeProxy"] = cs.KubeProxy
+			spec["kubelet"] = cs.Kubelet
+
+			if cs.NodeAuthorization != nil {
+				spec["nodeAuthorization"] = cs.NodeAuthorization
+			}
+			if cs.KubeAPIServer != nil && cs.KubeAPIServer.EnableBootstrapAuthToken != nil {
+				spec["kubeAPIServer"] = map[string]interface{}{
+					"enableBootstrapAuthToken": cs.KubeAPIServer.EnableBootstrapAuthToken,
+				}
+			}
 
 			if ig.IsMaster() {
 				spec["encryptionConfig"] = cs.EncryptionConfig
+				spec["etcdClusters"] = make(map[string]kops.EtcdClusterSpec)
 				spec["kubeAPIServer"] = cs.KubeAPIServer
 				spec["kubeControllerManager"] = cs.KubeControllerManager
 				spec["kubeScheduler"] = cs.KubeScheduler
 				spec["masterKubelet"] = cs.MasterKubelet
-				spec["etcdClusters"] = make(map[string]kops.EtcdClusterSpec, 0)
 
 				for _, etcdCluster := range cs.EtcdClusters {
-					spec["etcdClusters"].(map[string]kops.EtcdClusterSpec)[etcdCluster.Name] = kops.EtcdClusterSpec{
+					c := kops.EtcdClusterSpec{
 						Image:   etcdCluster.Image,
 						Version: etcdCluster.Version,
 					}
+					// if the user has not specified memory or cpu allotments for etcd, do not
+					// apply one.  Described in PR #6313.
+					if etcdCluster.CPURequest != nil {
+						c.CPURequest = etcdCluster.CPURequest
+					}
+					if etcdCluster.MemoryRequest != nil {
+						c.MemoryRequest = etcdCluster.MemoryRequest
+					}
+					spec["etcdClusters"].(map[string]kops.EtcdClusterSpec)[etcdCluster.Name] = c
 				}
 			}
 
@@ -177,7 +247,6 @@ func (b *BootstrapScript) ResourceNodeUp(ig *kops.InstanceGroup, cluster *kops.C
 			spec["kubelet"] = ig.Spec.Kubelet
 			spec["nodeLabels"] = ig.Spec.NodeLabels
 			spec["taints"] = ig.Spec.Taints
-			spec["suspendProcesses"] = ig.Spec.SuspendProcesses
 
 			hooks, err := b.getRelevantHooks(ig.Spec.Hooks, ig.Spec.Role)
 			if err != nil {
@@ -348,7 +417,7 @@ func (b *BootstrapScript) createProxyEnv(ps *kops.EgressProxySpec) string {
 		buffer.WriteString("*[Uu]buntu*)\n")
 		buffer.WriteString(`  echo "Acquire::http::Proxy \"${http_proxy}\";" > /etc/apt/apt.conf.d/30proxy ;;` + "\n")
 		buffer.WriteString("*[Rr]ed[Hh]at*)\n")
-		buffer.WriteString(`  echo "http_proxy=${http_proxy}" >> /etc/yum.conf ;;` + "\n")
+		buffer.WriteString(`  echo "proxy=${http_proxy}" >> /etc/yum.conf ;;` + "\n")
 		buffer.WriteString("esac\n")
 
 		// Set env variables for systemd

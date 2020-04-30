@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,16 +17,17 @@ limitations under the License.
 package k8sapi
 
 import (
+	"context"
 	"crypto/x509"
 	"fmt"
 	"math/big"
 	"time"
 
-	"github.com/golang/glog"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/pki"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/util/pkg/vfs"
@@ -53,7 +54,7 @@ func NewKubernetesKeystore(client kubernetes.Interface, namespace string) fi.Key
 }
 
 func (c *KubernetesKeystore) issueCert(signer string, id string, serial *big.Int, privateKey *pki.PrivateKey, template *x509.Certificate) (*pki.Certificate, error) {
-	glog.Infof("Issuing new certificate: %q", id)
+	klog.Infof("Issuing new certificate: %q", id)
 
 	template.SerialNumber = serial
 
@@ -79,8 +80,8 @@ func (c *KubernetesKeystore) issueCert(signer string, id string, serial *big.Int
 	return cert, nil
 }
 
-func (c *KubernetesKeystore) findSecret(id string) (*v1.Secret, error) {
-	secret, err := c.client.CoreV1().Secrets(c.namespace).Get(id, metav1.GetOptions{})
+func (c *KubernetesKeystore) findSecret(ctx context.Context, id string) (*v1.Secret, error) {
+	secret, err := c.client.CoreV1().Secrets(c.namespace).Get(ctx, id, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, nil
@@ -91,7 +92,9 @@ func (c *KubernetesKeystore) findSecret(id string) (*v1.Secret, error) {
 }
 
 func (c *KubernetesKeystore) FindKeypair(id string) (*pki.Certificate, *pki.PrivateKey, fi.KeysetFormat, error) {
-	secret, err := c.findSecret(id)
+	ctx := context.TODO()
+
+	secret, err := c.findSecret(ctx, id)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -121,6 +124,8 @@ func (c *KubernetesKeystore) CreateKeypair(signer string, id string, template *x
 }
 
 func (c *KubernetesKeystore) StoreKeypair(id string, cert *pki.Certificate, privateKey *pki.PrivateKey) error {
+	ctx := context.TODO()
+
 	keypair := &KeypairSecret{
 		Namespace:   c.namespace,
 		Name:        id,
@@ -132,7 +137,7 @@ func (c *KubernetesKeystore) StoreKeypair(id string, cert *pki.Certificate, priv
 	if err != nil {
 		return fmt.Errorf("error encoding keypair: %+v  err: %s", keypair, err)
 	}
-	createdSecret, err := c.client.CoreV1().Secrets(c.namespace).Create(secret)
+	createdSecret, err := c.client.CoreV1().Secrets(c.namespace).Create(ctx, secret, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("error creating secret %s/%s: %v", secret.Namespace, secret.Name, err)
 	}

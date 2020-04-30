@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -29,8 +30,8 @@ import (
 	api "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/formatter"
 	"k8s.io/kops/util/pkg/tables"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 )
 
 var (
@@ -67,7 +68,8 @@ func NewCmdGetInstanceGroups(f *util.Factory, out io.Writer, getOptions *GetOpti
 		Long:    getInstancegroupsLong,
 		Example: getInstancegroupsExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := RunGetInstanceGroups(&options, args)
+			ctx := context.TODO()
+			err := RunGetInstanceGroups(ctx, &options, args)
 			if err != nil {
 				exitWithError(err)
 			}
@@ -77,7 +79,7 @@ func NewCmdGetInstanceGroups(f *util.Factory, out io.Writer, getOptions *GetOpti
 	return cmd
 }
 
-func RunGetInstanceGroups(options *GetInstanceGroupsOptions, args []string) error {
+func RunGetInstanceGroups(ctx context.Context, options *GetInstanceGroupsOptions, args []string) error {
 	out := os.Stdout
 
 	clusterName := rootCommand.ClusterName()
@@ -90,7 +92,7 @@ func RunGetInstanceGroups(options *GetInstanceGroupsOptions, args []string) erro
 		return err
 	}
 
-	cluster, err := clientset.GetCluster(clusterName)
+	cluster, err := clientset.GetCluster(ctx, clusterName)
 	if err != nil {
 		return fmt.Errorf("error fetching cluster %q: %v", clusterName, err)
 	}
@@ -99,12 +101,12 @@ func RunGetInstanceGroups(options *GetInstanceGroupsOptions, args []string) erro
 		return fmt.Errorf("cluster %q was not found", clusterName)
 	}
 
-	list, err := clientset.InstanceGroupsFor(cluster).List(metav1.ListOptions{})
+	list, err := clientset.InstanceGroupsFor(cluster).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
 
-	instancegroups, err := buildInstanceGroups(args, list)
+	instancegroups, err := filterInstanceGroupsByName(args, list.Items)
 	if err != nil {
 		return err
 	}
@@ -132,27 +134,26 @@ func RunGetInstanceGroups(options *GetInstanceGroupsOptions, args []string) erro
 	}
 }
 
-func buildInstanceGroups(args []string, list *api.InstanceGroupList) ([]*api.InstanceGroup, error) {
+func filterInstanceGroupsByName(instanceGroupNames []string, list []api.InstanceGroup) ([]*api.InstanceGroup, error) {
 	var instancegroups []*api.InstanceGroup
-	len := len(args)
-	if len != 0 {
+	if len(instanceGroupNames) != 0 {
+		// Build a map so we can return items in the same order
 		m := make(map[string]*api.InstanceGroup)
-		for i := range list.Items {
-			ig := &list.Items[i]
+		for i := range list {
+			ig := &list[i]
 			m[ig.ObjectMeta.Name] = ig
 		}
-		instancegroups = make([]*api.InstanceGroup, 0, len)
-		for _, arg := range args {
-			ig := m[arg]
+		for _, name := range instanceGroupNames {
+			ig := m[name]
 			if ig == nil {
-				return nil, fmt.Errorf("instancegroup not found %q", arg)
+				return nil, fmt.Errorf("instancegroup not found %q", name)
 			}
 
 			instancegroups = append(instancegroups, ig)
 		}
 	} else {
-		for i := range list.Items {
-			ig := &list.Items[i]
+		for i := range list {
+			ig := &list[i]
 			instancegroups = append(instancegroups, ig)
 		}
 	}
@@ -179,7 +180,7 @@ func igOutputTable(cluster *api.Cluster, instancegroups []*api.InstanceGroup, ou
 	t.AddColumn("MAX", func(c *api.InstanceGroup) string {
 		return int32PointerToString(c.Spec.MaxSize)
 	})
-	// SUBNETS is not not selected by default - not as useful as ZONES
+	// SUBNETS is not selected by default - not as useful as ZONES
 	return t.Render(instancegroups, os.Stdout, "NAME", "ROLE", "MACHINETYPE", "MIN", "MAX", "ZONES")
 }
 

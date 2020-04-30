@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,13 +20,14 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/golang/glog"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/dns"
 	"k8s.io/kops/upup/pkg/fi"
 )
 
-func BuildKubecfg(cluster *kops.Cluster, keyStore fi.Keystore, secretStore fi.SecretStore, status kops.StatusStore) (*KubeconfigBuilder, error) {
+func BuildKubecfg(cluster *kops.Cluster, keyStore fi.Keystore, secretStore fi.SecretStore, status kops.StatusStore, configAccess clientcmd.ConfigAccess) (*KubeconfigBuilder, error) {
 	clusterName := cluster.ObjectMeta.Name
 
 	master := cluster.Spec.MasterPublicName
@@ -72,20 +73,21 @@ func BuildKubecfg(cluster *kops.Cluster, keyStore fi.Keystore, secretStore fi.Se
 
 		sort.Strings(targets)
 		if len(targets) == 0 {
-			glog.Warningf("Did not find API endpoint for gossip hostname; may not be able to reach cluster")
+			klog.Warningf("Did not find API endpoint for gossip hostname; may not be able to reach cluster")
 		} else {
 			if len(targets) != 1 {
-				glog.Warningf("Found multiple API endpoints (%v), choosing arbitrarily", targets)
+				klog.Warningf("Found multiple API endpoints (%v), choosing arbitrarily", targets)
 			}
 			server = "https://" + targets[0]
 		}
 	}
 
-	b := NewKubeconfigBuilder()
+	b := NewKubeconfigBuilder(configAccess)
 
 	b.Context = clusterName
 
-	{
+	// add the CA Cert to the kubeconfig only if we didn't specify a SSL cert for the LB
+	if cluster.Spec.API == nil || cluster.Spec.API.LoadBalancer == nil || cluster.Spec.API.LoadBalancer.SSLCertificate == "" {
 		cert, _, _, err := keyStore.FindKeypair(fi.CertificateId_CA)
 		if err != nil {
 			return nil, fmt.Errorf("error fetching CA keypair: %v", err)

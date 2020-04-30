@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,9 +24,6 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/kops/pkg/apis/kops"
-	"k8s.io/kops/pkg/apis/kops/v1alpha1"
 	"k8s.io/kops/pkg/apis/kops/v1alpha2"
 	"k8s.io/kops/pkg/diff"
 	"k8s.io/kops/pkg/kopscodecs"
@@ -34,11 +31,7 @@ import (
 
 // TestConversionMinimal runs the test on a minimum configuration, similar to kops create cluster minimal.example.com --zones us-west-1a
 func TestConversionMinimal(t *testing.T) {
-	runTest(t, "minimal", "v1alpha1", "v1alpha2")
-	runTest(t, "minimal", "v1alpha2", "v1alpha1")
-
-	runTest(t, "minimal", "v1alpha0", "v1alpha1")
-	runTest(t, "minimal", "v1alpha0", "v1alpha2")
+	runTest(t, "minimal", "legacy-v1alpha2", "v1alpha2")
 }
 
 func runTest(t *testing.T, srcDir string, fromVersion string, toVersion string) {
@@ -54,13 +47,6 @@ func runTest(t *testing.T, srcDir string, fromVersion string, toVersion string) 
 		t.Fatalf("unexpected error reading expectedPath %q: %v", expectedPath, err)
 	}
 
-	codec := kopscodecs.Codecs.UniversalDecoder(kops.SchemeGroupVersion)
-
-	defaults := &schema.GroupVersionKind{
-		Group:   v1alpha1.SchemeGroupVersion.Group,
-		Version: v1alpha1.SchemeGroupVersion.Version,
-	}
-
 	yaml, ok := runtime.SerializerInfoForMediaType(kopscodecs.Codecs.SupportedMediaTypes(), "application/yaml")
 	if !ok {
 		t.Fatalf("no YAML serializer registered")
@@ -68,8 +54,6 @@ func runTest(t *testing.T, srcDir string, fromVersion string, toVersion string) 
 	var encoder runtime.Encoder
 
 	switch toVersion {
-	case "v1alpha1":
-		encoder = kopscodecs.Codecs.EncoderForVersion(yaml.Serializer, v1alpha1.SchemeGroupVersion)
 	case "v1alpha2":
 		encoder = kopscodecs.Codecs.EncoderForVersion(yaml.Serializer, v1alpha2.SchemeGroupVersion)
 
@@ -77,17 +61,15 @@ func runTest(t *testing.T, srcDir string, fromVersion string, toVersion string) 
 		t.Fatalf("unknown version %q", toVersion)
 	}
 
-	//decoder := k8sapi.Codecs.DecoderToVersion(yaml.Serializer, kops.SchemeGroupVersion)
-
 	var actual []string
 
 	for _, s := range strings.Split(string(sourceBytes), "\n---\n") {
-		o, gvk, err := codec.Decode([]byte(s), defaults, nil)
+		o, gvk, err := kopscodecs.Decode([]byte(s), nil)
 		if err != nil {
 			t.Fatalf("error parsing file %q: %v", sourcePath, err)
 		}
 
-		expectVersion := fromVersion
+		expectVersion := strings.TrimPrefix(fromVersion, "legacy-")
 		if expectVersion == "v1alpha0" {
 			// Our version before we had v1alpha1
 			expectVersion = "v1alpha1"

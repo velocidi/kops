@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -71,7 +71,7 @@ func TestFeatureGates(t *testing.T) {
 
 func TestFeatureGatesKubernetesVersion(t *testing.T) {
 	cluster := buildKubeletTestCluster()
-	cluster.Spec.KubernetesVersion = "1.4.0"
+	cluster.Spec.KubernetesVersion = "1.16.0"
 	err := buildOptions(cluster)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestFeatureGatesKubernetesVersion(t *testing.T) {
 
 	gates := cluster.Spec.Kubelet.FeatureGates
 	if _, found := gates["ExperimentalCriticalPodAnnotation"]; found {
-		t.Errorf("ExperimentalCriticalPodAnnotation feature gate should not be added on Kubernetes < 1.5.2")
+		t.Errorf("ExperimentalCriticalPodAnnotation feature gate should not be added on Kubernetes >= 1.16.0")
 	}
 }
 

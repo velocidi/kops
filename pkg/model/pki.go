@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,8 +18,9 @@ package model
 
 import (
 	"fmt"
+	"strings"
 
-	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/kops/pkg/rbac"
 	"k8s.io/kops/pkg/tokens"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/fitasks"
@@ -52,17 +53,18 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 	c.AddTask(defaultCA)
 
 	{
-
-		t := &fitasks.Keypair{
-			Name:      fi.String("kubelet"),
-			Lifecycle: b.Lifecycle,
-
-			Subject: "o=" + user.NodesGroup + ",cn=kubelet",
-			Type:    "client",
-			Signer:  defaultCA,
-			Format:  format,
+		// @check of bootstrap tokens are enable if so, disable the creation of the kubelet certificate - we also
+		// block at the IAM level for AWS cluster for pre-existing clusters.
+		if !b.UseBootstrapTokens() {
+			c.AddTask(&fitasks.Keypair{
+				Name:      fi.String("kubelet"),
+				Lifecycle: b.Lifecycle,
+				Subject:   "o=" + rbac.NodesGroup + ",cn=kubelet",
+				Type:      "client",
+				Signer:    defaultCA,
+				Format:    format,
+			})
 		}
-		c.AddTask(t)
 	}
 	{
 		// Generate a kubelet client certificate for api to speak securely to kubelets. This change was first
@@ -81,7 +83,7 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		t := &fitasks.Keypair{
 			Name:      fi.String("kube-scheduler"),
 			Lifecycle: b.Lifecycle,
-			Subject:   "cn=" + user.KubeScheduler,
+			Subject:   "cn=" + rbac.KubeScheduler,
 			Type:      "client",
 			Signer:    defaultCA,
 			Format:    format,
@@ -93,7 +95,7 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		t := &fitasks.Keypair{
 			Name:      fi.String("kube-proxy"),
 			Lifecycle: b.Lifecycle,
-			Subject:   "cn=" + user.KubeProxy,
+			Subject:   "cn=" + rbac.KubeProxy,
 			Type:      "client",
 			Signer:    defaultCA,
 			Format:    format,
@@ -105,7 +107,7 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		t := &fitasks.Keypair{
 			Name:      fi.String("kube-controller-manager"),
 			Lifecycle: b.Lifecycle,
-			Subject:   "cn=" + user.KubeControllerManager,
+			Subject:   "cn=" + rbac.KubeControllerManager,
 			Type:      "client",
 			Signer:    defaultCA,
 			Format:    format,
@@ -113,23 +115,56 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		c.AddTask(t)
 	}
 
-	// check if we need to generate certificates for etcd peers certificates from a different CA?
-	// @question i think we should use another KeyStore for this, perhaps registering a EtcdKeyStore given
-	// that mutual tls used to verify between the peers we don't want certificates for kubernetes able to act as a peer.
-	// For clients assuming we are using etcdv3 is can switch on user authentication and map the common names for auth.
-	if b.UseEtcdTLS() {
-		alternativeNames := []string{fmt.Sprintf("*.internal.%s", b.ClusterName()), "localhost", "127.0.0.1"}
+	if b.UseEtcdManager() {
+		// We generate keypairs in the etcdmanager task itself
+	} else if b.UseEtcdTLS() {
+		// check if we need to generate certificates for etcd peers certificates from a different CA?
+		// @question i think we should use another KeyStore for this, perhaps registering a EtcdKeyStore given
+		// that mutual tls used to verify between the peers we don't want certificates for kubernetes able to act as a peer.
+		// For clients assuming we are using etcdv3 is can switch on user authentication and map the common names for auth.
+		servingNames := []string{fmt.Sprintf("*.internal.%s", b.ClusterName()), "localhost", "127.0.0.1"}
 		// @question should wildcard's be here instead of generating per node. If we ever provide the
 		// ability to resize the master, this will become a blocker
 		c.AddTask(&fitasks.Keypair{
-			AlternateNames: alternativeNames,
+			AlternateNames: servingNames,
 			Lifecycle:      b.Lifecycle,
 			Name:           fi.String("etcd"),
 			Subject:        "cn=etcd",
-			Type:           "clientServer",
-			Signer:         defaultCA,
-			Format:         format,
+			// TODO: Can this be "server" now that we're not using it for peer connectivity?
+			Type:   "clientServer",
+			Signer: defaultCA,
+			Format: format,
 		})
+
+		// For peer authentication, the same cert is used both as a client
+		// cert and as a server cert (which is unusual).  Moreover, etcd
+		// 3.2 introduces some breaking changes to certificate validation
+		// where it tries to match any IP or DNS names to the client IP
+		// (including reverse DNS lookups!)  We _could_ include a wildcard
+		// reverse DNS name e.g. *.ec2.internal for EC2, but it seems
+		// better just to list the names that we expect peer connectivity
+		// to happen on.
+		var peerNames []string
+		for _, etcdCluster := range b.Cluster.Spec.EtcdClusters {
+			prefix := "etcd-" + etcdCluster.Name + "-"
+			if prefix == "etcd-main-" {
+				prefix = "etcd-"
+			}
+			for _, m := range etcdCluster.Members {
+				peerNames = append(peerNames, prefix+m.Name+".internal."+b.ClusterName())
+			}
+		}
+		c.AddTask(&fitasks.Keypair{
+			AlternateNames: peerNames,
+
+			Lifecycle: b.Lifecycle,
+			Name:      fi.String("etcd-peer"),
+			Subject:   "cn=etcd-peer",
+			Type:      "clientServer",
+			Signer:    defaultCA,
+			Format:    format,
+		})
+
 		c.AddTask(&fitasks.Keypair{
 			Name:      fi.String("etcd-client"),
 			Lifecycle: b.Lifecycle,
@@ -167,7 +202,7 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		t := &fitasks.Keypair{
 			Name:      fi.String("kubecfg"),
 			Lifecycle: b.Lifecycle,
-			Subject:   "o=" + user.SystemPrivilegedGroup + ",cn=kubecfg",
+			Subject:   "o=" + rbac.SystemPrivilegedGroup + ",cn=kubecfg",
 			Type:      "client",
 			Signer:    defaultCA,
 			Format:    format,
@@ -214,7 +249,7 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		t := &fitasks.Keypair{
 			Name:      fi.String("kops"),
 			Lifecycle: b.Lifecycle,
-			Subject:   "o=" + user.SystemPrivilegedGroup + ",cn=kops",
+			Subject:   "o=" + rbac.SystemPrivilegedGroup + ",cn=kops",
 			Type:      "client",
 			Signer:    defaultCA,
 			Format:    format,
@@ -260,10 +295,62 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		c.AddTask(t)
 	}
 
+	if b.Cluster.Spec.Authentication != nil {
+		if b.KopsModelContext.Cluster.Spec.Authentication.Aws != nil {
+			alternateNames := []string{
+				"localhost",
+				"127.0.0.1",
+			}
+
+			t := &fitasks.Keypair{
+				Name:           fi.String("aws-iam-authenticator"),
+				Subject:        "cn=aws-iam-authenticator",
+				Type:           "server",
+				AlternateNames: alternateNames,
+				Signer:         defaultCA,
+				Format:         format,
+			}
+			c.AddTask(t)
+		}
+	}
+
+	// @TODO this is VERY presumptuous, i'm going on the basis we can make it configurable in the future.
+	// But I'm conscious not to do too much work on bootstrap tokens as it might overlay further down the
+	// line with the machines api
+	if b.UseBootstrapTokens() {
+		serviceName := "node-authorizer-internal"
+
+		alternateNames := []string{
+			"127.0.0.1",
+			"localhost",
+			serviceName,
+			strings.Join([]string{serviceName, b.Cluster.Name}, "."),
+			strings.Join([]string{serviceName, b.Cluster.Spec.DNSZone}, "."),
+		}
+
+		// @note: the certificate used by the node authorizers
+		c.AddTask(&fitasks.Keypair{
+			Name:           fi.String("node-authorizer"),
+			Subject:        "cn=node-authorizaer",
+			Type:           "server",
+			AlternateNames: alternateNames,
+			Signer:         defaultCA,
+			Format:         format,
+		})
+
+		// @note: we use this for mutual tls between node and authorizer
+		c.AddTask(&fitasks.Keypair{
+			Name:    fi.String("node-authorizer-client"),
+			Subject: "cn=node-authorizer-client",
+			Type:    "client",
+			Signer:  defaultCA,
+			Format:  format,
+		})
+	}
+
 	// Create auth tokens (though this is deprecated)
 	for _, x := range tokens.GetKubernetesAuthTokens_Deprecated() {
-		t := &fitasks.Secret{Name: fi.String(x), Lifecycle: b.Lifecycle}
-		c.AddTask(t)
+		c.AddTask(&fitasks.Secret{Name: fi.String(x), Lifecycle: b.Lifecycle})
 	}
 
 	{

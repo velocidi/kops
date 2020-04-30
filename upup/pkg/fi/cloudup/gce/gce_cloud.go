@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,19 +18,19 @@ package gce
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
 
-	"github.com/golang/glog"
-	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
-	compute "google.golang.org/api/compute/v0.beta"
+	compute "google.golang.org/api/compute/v1"
+	"google.golang.org/api/dns/v1"
 	"google.golang.org/api/iam/v1"
 	oauth2 "google.golang.org/api/oauth2/v2"
 	"google.golang.org/api/storage/v1"
+	"k8s.io/klog"
 	"k8s.io/kops/dnsprovider/pkg/dnsprovider"
 	"k8s.io/kops/dnsprovider/pkg/dnsprovider/providers/google/clouddns"
 	"k8s.io/kops/pkg/apis/kops"
@@ -42,8 +42,8 @@ type GCECloud interface {
 	Compute() *compute.Service
 	Storage() *storage.Service
 	IAM() *iam.Service
+	CloudDNS() *dns.Service
 
-	Region() string
 	Project() string
 	WaitForOp(op *compute.Operation) error
 	GetApiIngressStatus(cluster *kops.Cluster) ([]kops.ApiIngressStatus, error)
@@ -62,6 +62,7 @@ type gceCloudImplementation struct {
 	compute *compute.Service
 	storage *storage.Service
 	iam     *iam.Service
+	dns     *dns.Service
 
 	region  string
 	project string
@@ -98,12 +99,12 @@ func DefaultProject() (string, error) {
 	cmd.Stderr = &stderr
 
 	human := strings.Join(cmd.Args, " ")
-	glog.V(2).Infof("Running command: %s", human)
+	klog.V(2).Infof("Running command: %s", human)
 	err := cmd.Run()
 	if err != nil {
-		glog.Infof("error running %s", human)
-		glog.Info(stdout.String())
-		glog.Info(stderr.String())
+		klog.Infof("error running %s", human)
+		klog.Info(stdout.String())
+		klog.Info(stderr.String())
 		return "", fmt.Errorf("error running %s: %v", human, err)
 	}
 
@@ -122,42 +123,43 @@ func NewGCECloud(region string, project string, labels map[string]string) (GCECl
 	ctx := context.Background()
 
 	if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" {
-		glog.Infof("Will load GOOGLE_APPLICATION_CREDENTIALS from %s", os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+		klog.Infof("Will load GOOGLE_APPLICATION_CREDENTIALS from %s", os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 	}
 
-	// TODO: should we create different clients with per-service scopes?
-	client, err := google.DefaultClient(ctx, compute.CloudPlatformScope)
-	if err != nil {
-		return nil, fmt.Errorf("error building google API client: %v", err)
-	}
-	computeService, err := compute.New(client)
+	computeService, err := compute.NewService(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error building compute API client: %v", err)
 	}
 	c.compute = computeService
 
-	storageService, err := storage.New(client)
+	storageService, err := storage.NewService(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error building storage API client: %v", err)
 	}
 	c.storage = storageService
 
-	iamService, err := iam.New(client)
+	iamService, err := iam.NewService(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error building IAM API client: %v", err)
 	}
 	c.iam = iamService
+
+	dnsService, err := dns.NewService(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error building DNS API client: %v", err)
+	}
+	c.dns = dnsService
 
 	gceCloudInstances[region+"::"+project] = c
 
 	{
 		// Attempt to log the current GCE service account in user, for diagnostic purposes
 		// At least until we get e2e running, we're doing this always
-		tokenInfo, err := c.getTokenInfo(client)
+		tokenInfo, err := c.getTokenInfo(ctx)
 		if err != nil {
-			glog.Infof("unable to get token info: %v", err)
+			klog.Infof("unable to get token info: %v", err)
 		} else {
-			glog.V(2).Infof("running with GCE credentials: email=%s, scope=%s", tokenInfo.Email, tokenInfo.Scope)
+			klog.V(2).Infof("running with GCE credentials: email=%s, scope=%s", tokenInfo.Email, tokenInfo.Scope)
 		}
 	}
 
@@ -193,6 +195,11 @@ func (c *gceCloudImplementation) IAM() *iam.Service {
 	return c.iam
 }
 
+// NameService returns the DNS client
+func (c *gceCloudImplementation) CloudDNS() *dns.Service {
+	return c.dns
+}
+
 // Region returns private struct element region.
 func (c *gceCloudImplementation) Region() string {
 	return c.region
@@ -207,7 +214,7 @@ func (c *gceCloudImplementation) Project() string {
 func (c *gceCloudImplementation) ServiceAccount() (string, error) {
 	if c.projectInfo == nil {
 		// Find the project info from the compute API, which includes the default service account
-		glog.V(2).Infof("fetching project %q from compute API", c.project)
+		klog.V(2).Infof("fetching project %q from compute API", c.project)
 		p, err := c.compute.Projects.Get(c.project).Do()
 		if err != nil {
 			return "", fmt.Errorf("error fetching info for project %q: %v", c.project, err)
@@ -226,13 +233,13 @@ func (c *gceCloudImplementation) ServiceAccount() (string, error) {
 func (c *gceCloudImplementation) DNS() (dnsprovider.Interface, error) {
 	provider, err := clouddns.CreateInterface(c.project, nil)
 	if err != nil {
-		return nil, fmt.Errorf("Error building (k8s) DNS provider: %v", err)
+		return nil, fmt.Errorf("error building (k8s) DNS provider: %v", err)
 	}
 	return provider, nil
 }
 
 func (c *gceCloudImplementation) FindVPCInfo(id string) (*fi.VPCInfo, error) {
-	glog.Warningf("FindVPCInfo not (yet) implemented on GCE")
+	klog.Warningf("FindVPCInfo not (yet) implemented on GCE")
 	return nil, nil
 }
 
@@ -270,7 +277,7 @@ func (c *gceCloudImplementation) Zones() ([]string, error) {
 		return nil, fmt.Errorf("unable to determine zones in region %q", c.Region())
 	}
 
-	glog.Infof("Scanning zones: %v", zones)
+	klog.Infof("Scanning zones: %v", zones)
 	return zones, nil
 }
 
@@ -284,7 +291,7 @@ func (c *gceCloudImplementation) GetApiIngressStatus(cluster *kops.Cluster) ([]k
 	// Note that this must match GCEModelContext::NameForForwardingRule
 	name := SafeObjectName("api", cluster.ObjectMeta.Name)
 
-	glog.V(2).Infof("Querying GCE to find ForwardingRules for API (%q)", name)
+	klog.V(2).Infof("Querying GCE to find ForwardingRules for API (%q)", name)
 	forwardingRule, err := c.compute.ForwardingRules.Get(c.project, c.region, name).Do()
 	if err != nil {
 		if !IsNotFound(err) {
@@ -296,7 +303,7 @@ func (c *gceCloudImplementation) GetApiIngressStatus(cluster *kops.Cluster) ([]k
 
 	if forwardingRule != nil {
 		if forwardingRule.IPAddress == "" {
-			return nil, fmt.Errorf("Found forward rule %q, but it did not have an IPAddress", name)
+			return nil, fmt.Errorf("found forward rule %q, but it did not have an IPAddress", name)
 		}
 
 		ingresses = append(ingresses, kops.ApiIngressStatus{
@@ -345,8 +352,8 @@ func FindInstanceTemplates(c GCECloud, clusterName string) ([]*compute.InstanceT
 }
 
 // logTokenInfo returns information about the active credential
-func (c *gceCloudImplementation) getTokenInfo(client *http.Client) (*oauth2.Tokeninfo, error) {
-	tokenSource, err := google.DefaultTokenSource(context.TODO(), compute.CloudPlatformScope)
+func (c *gceCloudImplementation) getTokenInfo(ctx context.Context) (*oauth2.Tokeninfo, error) {
+	tokenSource, err := google.DefaultTokenSource(ctx, compute.CloudPlatformScope)
 	if err != nil {
 		return nil, fmt.Errorf("error building token source: %v", err)
 	}
@@ -358,9 +365,9 @@ func (c *gceCloudImplementation) getTokenInfo(client *http.Client) (*oauth2.Toke
 
 	// Note: do not log token or any portion of it
 
-	service, err := oauth2.New(client)
+	service, err := oauth2.NewService(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error creating oauth2 service client: %v", err)
+		return nil, fmt.Errorf("error creating oauth2 service: %v", err)
 	}
 
 	tokenInfo, err := service.Tokeninfo().AccessToken(token.AccessToken).Do()

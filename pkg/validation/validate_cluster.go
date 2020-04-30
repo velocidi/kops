@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,20 +17,24 @@ limitations under the License.
 package validation
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
+	"strings"
 
-	"github.com/golang/glog"
-	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/pager"
+	"k8s.io/kops/upup/pkg/fi"
+
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
-	"k8s.io/kops/pkg/apis/kops/util"
 	"k8s.io/kops/pkg/cloudinstances"
 	"k8s.io/kops/pkg/dns"
-	"k8s.io/kops/upup/pkg/fi/cloudup"
 )
 
 // ValidationCluster uses a cluster to validate.
@@ -45,6 +49,18 @@ type ValidationError struct {
 	Kind    string `json:"type,omitempty"`
 	Name    string `json:"name,omitempty"`
 	Message string `json:"message,omitempty"`
+}
+
+type ClusterValidator interface {
+	// Validate validates a k8s cluster
+	Validate() (*ValidationCluster, error)
+}
+
+type clusterValidatorImpl struct {
+	cluster        *kops.Cluster
+	cloud          fi.Cloud
+	instanceGroups []*kops.InstanceGroup
+	k8sClient      kubernetes.Interface
 }
 
 func (v *ValidationCluster) addError(failure *ValidationError) {
@@ -66,13 +82,15 @@ func hasPlaceHolderIP(clusterName string) (bool, error) {
 	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
 		&clientcmd.ConfigOverrides{CurrentContext: clusterName}).ClientConfig()
+	if err != nil {
+		return false, fmt.Errorf("error building configuration: %v", err)
+	}
 
 	apiAddr, err := url.Parse(config.Host)
 	if err != nil {
 		return true, fmt.Errorf("unable to parse Kubernetes cluster API URL: %v", err)
 	}
-
-	hostAddrs, err := net.LookupHost(apiAddr.Host)
+	hostAddrs, err := net.LookupHost(apiAddr.Hostname())
 	if err != nil {
 		return true, fmt.Errorf("unable to resolve Kubernetes cluster API URL dns: %v", err)
 	}
@@ -86,11 +104,32 @@ func hasPlaceHolderIP(clusterName string) (bool, error) {
 	return false, nil
 }
 
-// ValidateCluster validates a k8s cluster with a provided instance group list
-func ValidateCluster(cluster *kops.Cluster, instanceGroupList *kops.InstanceGroupList, k8sClient kubernetes.Interface) (*ValidationCluster, error) {
-	clusterName := cluster.Name
+func NewClusterValidator(cluster *kops.Cluster, cloud fi.Cloud, instanceGroupList *kops.InstanceGroupList, k8sClient kubernetes.Interface) (ClusterValidator, error) {
+	var instanceGroups []*kops.InstanceGroup
 
-	v := &ValidationCluster{}
+	for i := range instanceGroupList.Items {
+		ig := &instanceGroupList.Items[i]
+		instanceGroups = append(instanceGroups, ig)
+	}
+
+	if len(instanceGroups) == 0 {
+		return nil, fmt.Errorf("no InstanceGroup objects found")
+	}
+
+	return &clusterValidatorImpl{
+		cluster:        cluster,
+		cloud:          cloud,
+		instanceGroups: instanceGroups,
+		k8sClient:      k8sClient,
+	}, nil
+}
+
+func (v *clusterValidatorImpl) Validate() (*ValidationCluster, error) {
+	ctx := context.TODO()
+
+	clusterName := v.cluster.Name
+
+	validation := &ValidationCluster{}
 
 	// Do not use if we are running gossip
 	if !dns.IsGossipHostname(clusterName) {
@@ -108,56 +147,40 @@ func ValidateCluster(cluster *kops.Cluster, instanceGroupList *kops.InstanceGrou
 				"  Please wait about 5-10 minutes for a master to start, dns-controller to launch, and DNS to propagate." +
 				"  The protokube container and dns-controller deployment logs may contain more diagnostic information." +
 				"  Etcd and the API DNS entries must be updated for a kops Kubernetes cluster to start."
-			v.addError(&ValidationError{
+			validation.addError(&ValidationError{
 				Kind:    "dns",
 				Name:    "apiserver",
 				Message: message,
 			})
-			return v, nil
+			return validation, nil
 		}
 	}
 
-	var instanceGroups []*kops.InstanceGroup
-
-	for i := range instanceGroupList.Items {
-		ig := &instanceGroupList.Items[i]
-		instanceGroups = append(instanceGroups, ig)
-	}
-
-	if len(instanceGroups) == 0 {
-		return nil, fmt.Errorf("no InstanceGroup objects found")
-	}
-
-	cloud, err := cloudup.BuildCloud(cluster)
-	if err != nil {
-		return nil, err
-	}
-
-	nodeList, err := k8sClient.CoreV1().Nodes().List(metav1.ListOptions{})
+	nodeList, err := v.k8sClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("error listing nodes: %v", err)
 	}
 
 	warnUnmatched := false
-	cloudGroups, err := cloud.GetCloudGroups(cluster, instanceGroups, warnUnmatched, nodeList.Items)
+	cloudGroups, err := v.cloud.GetCloudGroups(v.cluster, v.instanceGroups, warnUnmatched, nodeList.Items)
 	if err != nil {
 		return nil, err
 	}
-	v.validateNodes(cloudGroups)
+	validation.validateNodes(cloudGroups)
 
-	if err := v.collectComponentFailures(k8sClient); err != nil {
+	if err := validation.collectComponentFailures(ctx, v.k8sClient); err != nil {
 		return nil, fmt.Errorf("cannot get component status for %q: %v", clusterName, err)
 	}
 
-	if err = v.collectPodFailures(k8sClient); err != nil {
+	if err := validation.collectPodFailures(ctx, v.k8sClient, nodeList.Items); err != nil {
 		return nil, fmt.Errorf("cannot get pod health for %q: %v", clusterName, err)
 	}
 
-	return v, nil
+	return validation, nil
 }
 
-func (v *ValidationCluster) collectComponentFailures(client kubernetes.Interface) error {
-	componentList, err := client.CoreV1().ComponentStatuses().List(metav1.ListOptions{})
+func (v *ValidationCluster) collectComponentFailures(ctx context.Context, client kubernetes.Interface) error {
+	componentList, err := client.CoreV1().ComponentStatuses().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("error listing ComponentStatuses: %v", err)
 	}
@@ -168,7 +191,7 @@ func (v *ValidationCluster) collectComponentFailures(client kubernetes.Interface
 				v.addError(&ValidationError{
 					Kind:    "ComponentStatus",
 					Name:    component.Name,
-					Message: "component is unhealthy",
+					Message: fmt.Sprintf("component %q is unhealthy", component.Name),
 				})
 			}
 		}
@@ -176,26 +199,79 @@ func (v *ValidationCluster) collectComponentFailures(client kubernetes.Interface
 	return nil
 }
 
-func (v *ValidationCluster) collectPodFailures(client kubernetes.Interface) error {
-	pods, err := client.CoreV1().Pods("kube-system").List(metav1.ListOptions{})
+func (v *ValidationCluster) collectPodFailures(ctx context.Context, client kubernetes.Interface, nodes []v1.Node) error {
+	masterWithoutManager := map[string]bool{}
+	nodeByAddress := map[string]string{}
+	for _, node := range nodes {
+		labels := node.GetLabels()
+		if labels != nil && labels["kubernetes.io/role"] == "master" {
+			masterWithoutManager[node.Name] = true
+		}
+		for _, nodeAddress := range node.Status.Addresses {
+			nodeByAddress[nodeAddress.Address] = node.Name
+		}
+	}
+
+	err := pager.New(pager.SimplePageFunc(func(opts metav1.ListOptions) (runtime.Object, error) {
+		return client.CoreV1().Pods(metav1.NamespaceAll).List(ctx, opts)
+	})).EachListItem(context.TODO(), metav1.ListOptions{}, func(obj runtime.Object) error {
+		pod := obj.(*v1.Pod)
+		priority := pod.Spec.PriorityClassName
+		if priority != "system-cluster-critical" && priority != "system-node-critical" {
+			return nil
+		}
+		if pod.Status.Phase == v1.PodSucceeded {
+			return nil
+		}
+		if pod.Status.Phase == v1.PodPending {
+			v.addError(&ValidationError{
+				Kind:    "Pod",
+				Name:    pod.Namespace + "/" + pod.Name,
+				Message: fmt.Sprintf("%s pod %q is pending", priority, pod.Name),
+			})
+			return nil
+		}
+		if pod.Status.Phase == v1.PodUnknown {
+			v.addError(&ValidationError{
+				Kind:    "Pod",
+				Name:    pod.Namespace + "/" + pod.Name,
+				Message: fmt.Sprintf("%s pod %q is unknown phase", priority, pod.Name),
+			})
+			return nil
+		}
+		var notready []string
+		for _, container := range pod.Status.ContainerStatuses {
+			if !container.Ready {
+				notready = append(notready, container.Name)
+			}
+		}
+		if len(notready) != 0 {
+			v.addError(&ValidationError{
+				Kind:    "Pod",
+				Name:    pod.Namespace + "/" + pod.Name,
+				Message: fmt.Sprintf("%s pod %q is not ready (%s)", priority, pod.Name, strings.Join(notready, ",")),
+			})
+
+		}
+
+		labels := pod.GetLabels()
+		if pod.Namespace == "kube-system" && labels != nil && labels["k8s-app"] == "kube-controller-manager" {
+			delete(masterWithoutManager, nodeByAddress[pod.Status.HostIP])
+		}
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("error listing Pods: %v", err)
 	}
 
-	for _, pod := range pods.Items {
-		if pod.Status.Phase == v1.PodSucceeded {
-			continue
-		}
-		for _, status := range pod.Status.ContainerStatuses {
-			if !status.Ready {
-				v.addError(&ValidationError{
-					Kind:    "Pod",
-					Name:    "kube-system/" + pod.Name,
-					Message: fmt.Sprintf("kube-system pod %q is not healthy", pod.Name),
-				})
-			}
-		}
+	for node := range masterWithoutManager {
+		v.addError(&ValidationError{
+			Kind:    "Node",
+			Name:    node,
+			Message: fmt.Sprintf("master %q is missing kube-controller-manager pod", node),
+		})
 	}
+
 	return nil
 }
 
@@ -204,13 +280,20 @@ func (v *ValidationCluster) validateNodes(cloudGroups map[string]*cloudinstances
 		var allMembers []*cloudinstances.CloudInstanceGroupMember
 		allMembers = append(allMembers, cloudGroup.Ready...)
 		allMembers = append(allMembers, cloudGroup.NeedUpdate...)
-		if len(allMembers) < cloudGroup.MinSize {
+
+		numNodes := 0
+		for _, m := range allMembers {
+			if !m.Detached {
+				numNodes++
+			}
+		}
+		if numNodes < cloudGroup.MinSize {
 			v.addError(&ValidationError{
 				Kind: "InstanceGroup",
 				Name: cloudGroup.InstanceGroup.Name,
 				Message: fmt.Sprintf("InstanceGroup %q did not have enough nodes %d vs %d",
 					cloudGroup.InstanceGroup.Name,
-					len(allMembers),
+					numNodes,
 					cloudGroup.MinSize),
 			})
 		}
@@ -235,7 +318,7 @@ func (v *ValidationCluster) validateNodes(cloudGroups map[string]*cloudinstances
 				continue
 			}
 
-			role := util.GetNodeRole(node)
+			role := strings.ToLower(string(cloudGroup.InstanceGroup.Spec.Role))
 			if role == "" {
 				role = "node"
 			}
@@ -250,7 +333,6 @@ func (v *ValidationCluster) validateNodes(cloudGroups map[string]*cloudinstances
 
 			ready := isNodeReady(node)
 
-			// TODO: Use instance group role instead...
 			if n.Role == "master" {
 				if !ready {
 					v.addError(&ValidationError{
@@ -272,7 +354,7 @@ func (v *ValidationCluster) validateNodes(cloudGroups map[string]*cloudinstances
 
 				v.Nodes = append(v.Nodes, n)
 			} else {
-				glog.Warningf("ignoring node with role %q", n.Role)
+				klog.Warningf("ignoring node with role %q", n.Role)
 			}
 		}
 	}

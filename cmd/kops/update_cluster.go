@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,16 +18,18 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/golang/glog"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog"
 	"k8s.io/kops/cmd/kops/util"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/commands"
@@ -36,8 +38,8 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup"
 	"k8s.io/kops/upup/pkg/fi/utils"
 	"k8s.io/kops/upup/pkg/kutil"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 )
 
 var (
@@ -63,7 +65,7 @@ type UpdateClusterOptions struct {
 	Models          string
 	OutDir          string
 	SSHPublicKey    string
-	MaxTaskDuration time.Duration
+	RunTasksOptions fi.RunTasksOptions
 	CreateKubecfg   bool
 
 	Phase string
@@ -79,8 +81,8 @@ func (o *UpdateClusterOptions) InitDefaults() {
 	o.Models = strings.Join(cloudup.CloudupModels, ",")
 	o.SSHPublicKey = ""
 	o.OutDir = ""
-	o.MaxTaskDuration = cloudup.DefaultMaxTaskDuration
 	o.CreateKubecfg = true
+	o.RunTasksOptions.InitDefaults()
 }
 
 func NewCmdUpdateCluster(f *util.Factory, out io.Writer) *cobra.Command {
@@ -93,6 +95,8 @@ func NewCmdUpdateCluster(f *util.Factory, out io.Writer) *cobra.Command {
 		Long:    updateClusterLong,
 		Example: updateClusterExample,
 		Run: func(cmd *cobra.Command, args []string) {
+			ctx := context.TODO()
+
 			err := rootCommand.ProcessArgs(args)
 			if err != nil {
 				exitWithError(err)
@@ -100,7 +104,7 @@ func NewCmdUpdateCluster(f *util.Factory, out io.Writer) *cobra.Command {
 
 			clusterName := rootCommand.ClusterName()
 
-			if _, err := RunUpdateCluster(f, clusterName, out, options); err != nil {
+			if _, err := RunUpdateCluster(ctx, f, clusterName, out, options); err != nil {
 				exitWithError(err)
 			}
 		},
@@ -114,6 +118,8 @@ func NewCmdUpdateCluster(f *util.Factory, out io.Writer) *cobra.Command {
 	cmd.Flags().BoolVar(&options.CreateKubecfg, "create-kube-config", options.CreateKubecfg, "Will control automatically creating the kube config file on your local filesystem")
 	cmd.Flags().StringVar(&options.Phase, "phase", options.Phase, "Subset of tasks to run: "+strings.Join(cloudup.Phases.List(), ", "))
 	cmd.Flags().StringSliceVar(&options.LifecycleOverrides, "lifecycle-overrides", options.LifecycleOverrides, "comma separated list of phase overrides, example: SecurityGroups=Ignore,InternetGateway=ExistsAndWarnIfChanges")
+	viper.BindPFlag("lifecycle-overrides", cmd.Flags().Lookup("lifecycle-overrides"))
+	viper.BindEnv("lifecycle-overrides", "KOPS_LIFECYCLE_OVERRIDES")
 
 	return cmd
 }
@@ -126,7 +132,7 @@ type UpdateClusterResults struct {
 	TaskMap map[string]fi.Task
 }
 
-func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *UpdateClusterOptions) (*UpdateClusterResults, error) {
+func RunUpdateCluster(ctx context.Context, f *util.Factory, clusterName string, out io.Writer, c *UpdateClusterOptions) (*UpdateClusterResults, error) {
 	results := &UpdateClusterResults{}
 
 	isDryrun := false
@@ -154,7 +160,7 @@ func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *Upd
 		}
 	}
 
-	cluster, err := GetCluster(f, clusterName)
+	cluster, err := GetCluster(ctx, f, clusterName)
 	if err != nil {
 		return results, err
 	}
@@ -192,7 +198,7 @@ func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *Upd
 			return results, fmt.Errorf("error adding SSH public key: %v", err)
 		}
 
-		glog.Infof("Using SSH public key: %v\n", c.SSHPublicKey)
+		klog.Infof("Using SSH public key: %v\n", c.SSHPublicKey)
 	}
 
 	var phase cloudup.Phase
@@ -216,7 +222,7 @@ func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *Upd
 	for _, override := range c.LifecycleOverrides {
 		values := strings.Split(override, "=")
 		if len(values) != 2 {
-			return results, fmt.Errorf("Incorrect syntax for lifecyle-overrides, correct syntax is TaskName=lifecycleName, override provided: %q", override)
+			return results, fmt.Errorf("incorrect syntax for lifecyle-overrides, correct syntax is TaskName=lifecycleName, override provided: %q", override)
 		}
 
 		taskName := values[0]
@@ -232,12 +238,23 @@ func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *Upd
 
 	var instanceGroups []*kops.InstanceGroup
 	{
-		list, err := clientset.InstanceGroupsFor(cluster).List(metav1.ListOptions{})
+		list, err := clientset.InstanceGroupsFor(cluster).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return nil, err
 		}
 		for i := range list.Items {
 			instanceGroups = append(instanceGroups, &list.Items[i])
+
+			// Try to guess the path for additional third party volume plugins in CoreOS and Flatcar
+			image := strings.ToLower(list.Items[i].Spec.Image)
+			if strings.Contains(image, "coreos") || strings.Contains(image, "flatcar") {
+				if cluster.Spec.Kubelet == nil {
+					cluster.Spec.Kubelet = &kops.KubeletConfigSpec{}
+				}
+				if cluster.Spec.Kubelet.VolumePluginDirectory == "" {
+					cluster.Spec.Kubelet.VolumePluginDirectory = "/var/lib/kubelet/volumeplugins/"
+				}
+			}
 		}
 	}
 
@@ -246,7 +263,7 @@ func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *Upd
 		Cluster:            cluster,
 		DryRun:             isDryrun,
 		InstanceGroups:     instanceGroups,
-		MaxTaskDuration:    c.MaxTaskDuration,
+		RunTasksOptions:    &c.RunTasksOptions,
 		Models:             strings.Split(c.Models, ","),
 		OutDir:             c.OutDir,
 		Phase:              phase,
@@ -254,7 +271,7 @@ func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *Upd
 		LifecycleOverrides: lifecycleOverrideMap,
 	}
 
-	if err := applyCmd.Run(); err != nil {
+	if err := applyCmd.Run(ctx); err != nil {
 		return results, err
 	}
 
@@ -276,7 +293,7 @@ func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *Upd
 	if !isDryrun && c.CreateKubecfg {
 		hasKubecfg, err := hasKubecfg(cluster.ObjectMeta.Name)
 		if err != nil {
-			glog.Warningf("error reading kubecfg: %v", err)
+			klog.Warningf("error reading kubecfg: %v", err)
 			hasKubecfg = true
 		}
 		firstRun = !hasKubecfg
@@ -284,12 +301,12 @@ func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *Upd
 		kubecfgCert, err := keyStore.FindCert("kubecfg")
 		if err != nil {
 			// This is only a convenience; don't error because of it
-			glog.Warningf("Ignoring error trying to fetch kubecfg cert - won't export kubecfg: %v", err)
+			klog.Warningf("Ignoring error trying to fetch kubecfg cert - won't export kubecfg: %v", err)
 			kubecfgCert = nil
 		}
 		if kubecfgCert != nil {
-			glog.Infof("Exporting kubecfg for cluster")
-			conf, err := kubeconfig.BuildKubecfg(cluster, keyStore, secretStore, &commands.CloudDiscoveryStatusStore{})
+			klog.Infof("Exporting kubecfg for cluster")
+			conf, err := kubeconfig.BuildKubecfg(cluster, keyStore, secretStore, &commands.CloudDiscoveryStatusStore{}, clientcmd.NewDefaultPathOptions())
 			if err != nil {
 				return nil, err
 			}
@@ -298,7 +315,7 @@ func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *Upd
 				return nil, err
 			}
 		} else {
-			glog.Infof("kubecfg cert not found; won't export kubecfg")
+			klog.Infof("kubecfg cert not found; won't export kubecfg")
 		}
 	}
 
@@ -354,7 +371,7 @@ func RunUpdateCluster(f *util.Factory, clusterName string, out io.Writer, c *Upd
 				}
 			}
 			fmt.Fprintf(sb, " * the admin user is specific to Debian. If not using Debian please use the appropriate user based on your OS.\n")
-			fmt.Fprintf(sb, " * read about installing addons at: https://github.com/kubernetes/kops/blob/master/docs/addons.md.\n")
+			fmt.Fprintf(sb, " * read about installing addons at: https://kops.sigs.k8s.io/operations/addons.\n")
 			fmt.Fprintf(sb, "\n")
 		}
 

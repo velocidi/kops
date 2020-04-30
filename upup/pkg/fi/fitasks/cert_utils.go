@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 func pkixNameToString(name *pkix.Name) string {
@@ -139,7 +139,7 @@ var extKeyUsageStrings = map[x509.ExtKeyUsage]string{
 func extKeyUsageToString(u x509.ExtKeyUsage) string {
 	s := extKeyUsageStrings[u]
 	if s == "" {
-		glog.Warningf("Unhandled ExtKeyUsage: %v", u)
+		klog.Warningf("Unhandled ExtKeyUsage: %v", u)
 		s = fmt.Sprintf("ExtKeyUsage:%v", u)
 	}
 	return s

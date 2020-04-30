@@ -23,7 +23,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/acls"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/util/pkg/hashing"
@@ -48,25 +48,44 @@ func (e *CopyFile) CompareWithID() *string {
 	return e.Name
 }
 
+// fileExtensionForSHA returns the expected extension for the given hash
+// If the hash length is not recognized, it returns an error.
+func fileExtensionForSHA(sha string) (string, error) {
+	switch len(sha) {
+	case 40:
+		return ".sha1", nil
+	case 64:
+		return ".sha256", nil
+	default:
+		return "", fmt.Errorf("unhandled sha length for %q", sha)
+	}
+}
+
 // Find attempts to find a file.
 func (e *CopyFile) Find(c *fi.Context) (*CopyFile, error) {
+	expectedSHA := strings.TrimSpace(fi.StringValue(e.SHA))
 
-	targetSHAFile := fi.StringValue(e.TargetFile) + ".sha1"
+	shaExtension, err := fileExtensionForSHA(expectedSHA)
+	if err != nil {
+		return nil, err
+	}
+
+	targetSHAFile := fi.StringValue(e.TargetFile) + shaExtension
+
 	targetSHABytes, err := vfs.Context.ReadFile(targetSHAFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			glog.V(4).Infof("unable to download: %q, assuming target file is not present, and if not present may not be an error: %v",
+			klog.V(4).Infof("unable to download: %q, assuming target file is not present, and if not present may not be an error: %v",
 				targetSHAFile, err)
 			return nil, nil
-		} else {
-			glog.V(4).Infof("unable to download: %q, %v", targetSHAFile, err)
-			// TODO should we throw err here?
-			return nil, nil
 		}
+		klog.V(4).Infof("unable to download: %q, %v", targetSHAFile, err)
+		// TODO should we throw err here?
+		return nil, nil
 	}
-
 	targetSHA := string(targetSHABytes)
-	if strings.TrimSpace(targetSHA) == strings.TrimSpace(fi.StringValue(e.SHA)) {
+
+	if strings.TrimSpace(targetSHA) == expectedSHA {
 		actual := &CopyFile{
 			Name:       e.Name,
 			TargetFile: e.TargetFile,
@@ -74,11 +93,11 @@ func (e *CopyFile) Find(c *fi.Context) (*CopyFile, error) {
 			SourceFile: e.SourceFile,
 			Lifecycle:  e.Lifecycle,
 		}
-		glog.V(8).Infof("found matching target sha1 for file: %q", fi.StringValue(e.TargetFile))
+		klog.V(8).Infof("found matching target sha1 for file: %q", fi.StringValue(e.TargetFile))
 		return actual, nil
 	}
 
-	glog.V(8).Infof("did not find same file, found mismatching target sha1 for file: %q", fi.StringValue(e.TargetFile))
+	klog.V(8).Infof("did not find same file, found mismatching target sha1 for file: %q", fi.StringValue(e.TargetFile))
 	return nil, nil
 
 }
@@ -107,7 +126,7 @@ func (_ *CopyFile) Render(c *fi.Context, a, e, changes *CopyFile) error {
 	target := fi.StringValue(e.TargetFile)
 	sourceSha := fi.StringValue(e.SHA)
 
-	glog.V(2).Infof("copying bits from %q to %q", source, target)
+	klog.V(2).Infof("copying bits from %q to %q", source, target)
 
 	if err := transferFile(c, source, target, sourceSha); err != nil {
 		return fmt.Errorf("unable to transfer %q to %q: %v", source, target, err)
@@ -142,28 +161,33 @@ func transferFile(c *fi.Context, source string, target string, sha string) error
 		return fmt.Errorf("error building path %q: %v", objectStore, err)
 	}
 
-	shaTarget := objectStore + ".sha1"
+	shaExtension, err := fileExtensionForSHA(sha)
+	if err != nil {
+		return err
+	}
+
+	shaTarget := objectStore + shaExtension
 	shaVFS, err := vfs.Context.BuildVfsPath(shaTarget)
 	if err != nil {
 		return fmt.Errorf("error building path %q: %v", shaTarget, err)
 	}
 
-	in := bytes.NewReader(data)
-	dataHash, err := hashing.HashAlgorithmSHA1.Hash(in)
-	if err != nil {
-		return fmt.Errorf("unable to parse sha from file %q downloaded: %v", sha, err)
-	}
-
 	shaHash, err := hashing.FromString(strings.TrimSpace(sha))
 	if err != nil {
-		return fmt.Errorf("unable to hash sha: %q, %v", sha, err)
+		return fmt.Errorf("unable to parse sha: %q, %v", sha, err)
+	}
+
+	in := bytes.NewReader(data)
+	dataHash, err := shaHash.Algorithm.Hash(in)
+	if err != nil {
+		return fmt.Errorf("unable to hash file %q downloaded: %v", source, err)
 	}
 
 	if !shaHash.Equal(dataHash) {
 		return fmt.Errorf("the sha value in %q does not match %q calculated value %q", shaTarget, source, dataHash.String())
 	}
 
-	glog.Infof("uploading %q to %q", source, objectStore)
+	klog.Infof("uploading %q to %q", source, objectStore)
 	if err := writeFile(c, uploadVFS, data); err != nil {
 		return err
 	}
@@ -190,7 +214,7 @@ func writeFile(c *fi.Context, p vfs.Path, data []byte) error {
 	return nil
 }
 
-// buildVFSPath task a recognizable https url and transforms that URL into the equivalent url with the the object
+// buildVFSPath task a recognizable https url and transforms that URL into the equivalent url with the object
 // store prefix.
 func buildVFSPath(target string) (string, error) {
 	if !strings.Contains(target, "://") || strings.HasPrefix(target, "memfs://") {
@@ -220,10 +244,10 @@ func buildVFSPath(target string) (string, error) {
 	}
 
 	if vfsPath == "" {
-		glog.Errorf("Unable to determine VFS path from supplied URL: %s", target)
-		glog.Errorf("S3, Google Cloud Storage, and File Paths are supported.")
-		glog.Errorf("For S3, please make sure that the supplied file repository URL adhere to S3 naming conventions, https://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region.")
-		glog.Errorf("For GCS, please make sure that the supplied file repository URL adheres to https://storage.googleapis.com/")
+		klog.Errorf("Unable to determine VFS path from supplied URL: %s", target)
+		klog.Errorf("S3, Google Cloud Storage, and File Paths are supported.")
+		klog.Errorf("For S3, please make sure that the supplied file repository URL adhere to S3 naming conventions, https://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region.")
+		klog.Errorf("For GCS, please make sure that the supplied file repository URL adheres to https://storage.googleapis.com/")
 		if err != nil { // print the S3 error for more details
 			return "", fmt.Errorf("Error Details: %v", err)
 		}

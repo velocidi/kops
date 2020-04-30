@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,8 +20,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path/filepath"
-	"strings"
-	"text/template"
 
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/upup/pkg/fi"
@@ -38,13 +36,15 @@ var _ fi.ModelBuilder = &FileAssetsBuilder{}
 // Build is responsible for writing out the file assets from cluster and instanceGroup
 func (f *FileAssetsBuilder) Build(c *fi.ModelBuilderContext) error {
 	// used to keep track of previous file, so a instanceGroup can override a cluster wide one
-	tracker := make(map[string]bool, 0)
+	tracker := make(map[string]bool)
+
 	// ensure the default path exists
 	c.EnsureTask(&nodetasks.File{
 		Path: f.FileAssetsDefaultPath(),
 		Type: nodetasks.FileType_Directory,
 		Mode: s("0755"),
 	})
+
 	// do we have any instanceGroup file assets
 	if f.InstanceGroup.Spec.FileAssets != nil {
 		if err := f.buildFileAssets(c, f.InstanceGroup.Spec.FileAssets, tracker); err != nil {
@@ -63,7 +63,7 @@ func (f *FileAssetsBuilder) Build(c *fi.ModelBuilderContext) error {
 // buildFileAssets is responsible for rendering the file assets to disk
 func (f *FileAssetsBuilder) buildFileAssets(c *fi.ModelBuilderContext, assets []kops.FileAssetSpec, tracker map[string]bool) error {
 	for _, asset := range assets {
-		// @check if the file asset applys to us. If no roles applied we assume its applied to all roles
+		// @check if the file asset applies to us. If no roles applied we assume its applied to all roles
 		if len(asset.Roles) > 0 && !containsRole(f.InstanceGroup.Spec.Role, asset.Roles) {
 			continue
 		}
@@ -83,7 +83,7 @@ func (f *FileAssetsBuilder) buildFileAssets(c *fi.ModelBuilderContext, assets []
 		if asset.IsBase64 {
 			decoded, err := base64.RawStdEncoding.DecodeString(content)
 			if err != nil {
-				return fmt.Errorf("Failed on file asset: %s is invalid, unable to decode base64, error: %q", asset.Name, err)
+				return fmt.Errorf("failed on file asset: %s is invalid, unable to decode base64, error: %q", asset.Name, err)
 			}
 			content = string(decoded)
 		}
@@ -104,10 +104,4 @@ func (f *FileAssetsBuilder) buildFileAssets(c *fi.ModelBuilderContext, assets []
 	}
 
 	return nil
-}
-
-// @perhaps a path finder?
-var templateFuncs = template.FuncMap{
-	"split": strings.Split,
-	"join":  strings.Join,
 }

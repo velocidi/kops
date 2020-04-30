@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@ limitations under the License.
 package cloudup
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net"
 	"sort"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/pkg/util/subnet"
 	"k8s.io/kops/upup/pkg/fi"
 )
 
@@ -46,7 +46,7 @@ func assignCIDRsToSubnets(c *kops.Cluster) error {
 	// for now we'll require users to set CIDRs themselves
 
 	if allSubnetsHaveCIDRs(c) {
-		glog.V(4).Infof("All subnets have CIDRs; skipping assignment logic")
+		klog.V(4).Infof("All subnets have CIDRs; skipping assignment logic")
 		return nil
 	}
 
@@ -93,7 +93,7 @@ func assignCIDRsToSubnets(c *kops.Cluster) error {
 	}
 
 	if allSubnetsHaveCIDRs(c) {
-		glog.V(4).Infof("All subnets have CIDRs; skipping assignment logic")
+		klog.V(4).Infof("All subnets have CIDRs; skipping assignment logic")
 		return nil
 	}
 
@@ -109,7 +109,7 @@ func assignCIDRsToSubnets(c *kops.Cluster) error {
 	// TODO: Does this make sense on GCE?
 	// TODO: Should we limit this to say 1000 IPs per subnet? (any reason to?)
 
-	bigCIDRs, err := splitInto8Subnets(cidr)
+	bigCIDRs, err := subnet.SplitInto8(cidr)
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func assignCIDRsToSubnets(c *kops.Cluster) error {
 		for _, c := range bigCIDRs {
 			overlapped := false
 			for _, r := range reserved {
-				if cidrsOverlap(r, c) {
+				if subnet.Overlap(r, c) {
 					overlapped = true
 				}
 			}
@@ -162,7 +162,7 @@ func assignCIDRsToSubnets(c *kops.Cluster) error {
 		return fmt.Errorf("could not find any non-overlapping CIDRs in parent NetworkCIDR; cannot automatically assign CIDR to subnet")
 	}
 
-	littleCIDRs, err := splitInto8Subnets(bigCIDRs[0])
+	littleCIDRs, err := subnet.SplitInto8(bigCIDRs[0])
 	if err != nil {
 		return err
 	}
@@ -181,7 +181,7 @@ func assignCIDRsToSubnets(c *kops.Cluster) error {
 			return fmt.Errorf("insufficient (big) CIDRs remaining for automatic CIDR allocation to subnet %q", subnet.Name)
 		}
 		subnet.CIDR = bigCIDRs[0].String()
-		glog.Infof("Assigned CIDR %s to subnet %s", subnet.CIDR, subnet.Name)
+		klog.Infof("Assigned CIDR %s to subnet %s", subnet.CIDR, subnet.Name)
 
 		bigCIDRs = bigCIDRs[1:]
 	}
@@ -195,38 +195,12 @@ func assignCIDRsToSubnets(c *kops.Cluster) error {
 			return fmt.Errorf("insufficient (little) CIDRs remaining for automatic CIDR allocation to subnet %q", subnet.Name)
 		}
 		subnet.CIDR = littleCIDRs[0].String()
-		glog.Infof("Assigned CIDR %s to subnet %s", subnet.CIDR, subnet.Name)
+		klog.Infof("Assigned CIDR %s to subnet %s", subnet.CIDR, subnet.Name)
 
 		littleCIDRs = littleCIDRs[1:]
 	}
 
 	return nil
-}
-
-// splitInto8Subnets splits the parent IPNet into 8 subnets
-func splitInto8Subnets(parent *net.IPNet) ([]*net.IPNet, error) {
-	networkLength, _ := parent.Mask.Size()
-	networkLength += 3
-
-	var subnets []*net.IPNet
-	for i := 0; i < 8; i++ {
-		ip4 := parent.IP.To4()
-		if ip4 != nil {
-			n := binary.BigEndian.Uint32(ip4)
-			n += uint32(i) << uint(32-networkLength)
-			subnetIP := make(net.IP, len(ip4))
-			binary.BigEndian.PutUint32(subnetIP, n)
-
-			subnets = append(subnets, &net.IPNet{
-				IP:   subnetIP,
-				Mask: net.CIDRMask(networkLength, 32),
-			})
-		} else {
-			return nil, fmt.Errorf("Unexpected IP address type: %s", parent)
-		}
-	}
-
-	return subnets, nil
 }
 
 // allSubnetsHaveCIDRs returns true iff each subnet in the cluster has a non-empty CIDR
@@ -239,9 +213,4 @@ func allSubnetsHaveCIDRs(c *kops.Cluster) bool {
 	}
 
 	return true
-}
-
-// cidrsOverlap returns true iff the two CIDRs are non-disjoint
-func cidrsOverlap(l, r *net.IPNet) bool {
-	return l.Contains(r.IP) || r.Contains(l.IP)
 }

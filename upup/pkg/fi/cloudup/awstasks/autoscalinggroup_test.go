@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"k8s.io/kops/pkg/diff"
+	"k8s.io/kops/upup/pkg/fi"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
@@ -126,4 +127,288 @@ func TestGetASGTagsToDelete(t *testing.T) {
 			t.Logf("diff:\n%s\n", diffString)
 		}
 	}
+}
+
+func TestProcessCompare(t *testing.T) {
+	rebalance := "AZRebalance"
+	healthcheck := "HealthCheck"
+
+	a := []string{}
+	b := []string{
+		rebalance,
+	}
+	c := []string{
+		rebalance,
+		healthcheck,
+	}
+
+	cases := []struct {
+		A                 *[]string
+		B                 *[]string
+		ExpectedProcesses []*string
+	}{
+		{
+			A:                 &a,
+			B:                 &b,
+			ExpectedProcesses: []*string{},
+		},
+		{
+			A: &b,
+			B: &a,
+			ExpectedProcesses: []*string{
+				&rebalance,
+			},
+		},
+		{
+			A: &c,
+			B: &b,
+			ExpectedProcesses: []*string{
+				&healthcheck,
+			},
+		},
+		{
+			A: &c,
+			B: &a,
+			ExpectedProcesses: []*string{
+				&rebalance,
+				&healthcheck,
+			},
+		},
+	}
+
+	for i, x := range cases {
+		result := processCompare(x.A, x.B)
+
+		expected, err := yaml.Marshal(x.ExpectedProcesses)
+		if err != nil {
+			t.Errorf("case %d, unexpected error converting expected processes to yaml: %v", i, err)
+		}
+
+		actual, err := yaml.Marshal(result)
+		if err != nil {
+			t.Errorf("case %d, unexpected error converting actual result to yaml: %v", i, err)
+		}
+
+		if string(expected) != string(actual) {
+			diffString := diff.FormatDiff(string(expected), string(actual))
+			t.Errorf("case %d failed, actual output differed from expected.", i)
+			t.Logf("diff:\n%s\n", diffString)
+		}
+	}
+}
+
+func TestAutoscalingGroupTerraformRender(t *testing.T) {
+	cases := []*renderTest{
+		{
+			Resource: &AutoscalingGroup{
+				Name:                fi.String("test"),
+				Granularity:         fi.String("5min"),
+				LaunchConfiguration: &LaunchConfiguration{Name: fi.String("test_lc")},
+				MaxSize:             fi.Int64(10),
+				Metrics:             []string{"test"},
+				MinSize:             fi.Int64(1),
+				Subnets: []*Subnet{
+					{
+						Name: fi.String("test-sg"),
+						ID:   fi.String("sg-1111"),
+					},
+				},
+				Tags: map[string]string{
+					"test":    "tag",
+					"cluster": "test",
+				},
+			},
+			Expected: `provider "aws" {
+  region = "eu-west-2"
+}
+
+resource "aws_autoscaling_group" "test" {
+  enabled_metrics      = ["test"]
+  launch_configuration = aws_launch_configuration.test_lc.id
+  max_size             = 10
+  metrics_granularity  = "5min"
+  min_size             = 1
+  name                 = "test"
+  tag {
+    key                 = "cluster"
+    propagate_at_launch = true
+    value               = "test"
+  }
+  tag {
+    key                 = "test"
+    propagate_at_launch = true
+    value               = "tag"
+  }
+  vpc_zone_identifier = [aws_subnet.test-sg.id]
+}
+
+terraform {
+  required_version = ">= 0.12.0"
+}
+`,
+		},
+		{
+			Resource: &AutoscalingGroup{
+				Name:                        fi.String("test1"),
+				LaunchTemplate:              &LaunchTemplate{Name: fi.String("test_lt")},
+				MaxSize:                     fi.Int64(10),
+				Metrics:                     []string{"test"},
+				MinSize:                     fi.Int64(5),
+				MixedInstanceOverrides:      []string{"t2.medium", "t2.large"},
+				MixedOnDemandBase:           fi.Int64(4),
+				MixedOnDemandAboveBase:      fi.Int64(30),
+				MixedSpotAllocationStrategy: fi.String("capacity-optimized"),
+				Subnets: []*Subnet{
+					{
+						Name: fi.String("test-sg"),
+						ID:   fi.String("sg-1111"),
+					},
+				},
+				Tags: map[string]string{
+					"test":    "tag",
+					"cluster": "test",
+				},
+			},
+			Expected: `provider "aws" {
+  region = "eu-west-2"
+}
+
+resource "aws_autoscaling_group" "test1" {
+  enabled_metrics = ["test"]
+  max_size        = 10
+  min_size        = 5
+  mixed_instances_policy {
+    instances_distribution {
+      on_demand_base_capacity                  = 4
+      on_demand_percentage_above_base_capacity = 30
+      spot_allocation_strategy                 = "capacity-optimized"
+    }
+    launch_template {
+      launch_template_specification {
+        launch_template_id = aws_launch_template.test_lt.id
+        version            = aws_launch_template.test_lt.latest_version
+      }
+      override {
+        instance_type = "t2.medium"
+      }
+      override {
+        instance_type = "t2.large"
+      }
+    }
+  }
+  name = "test1"
+  tag {
+    key                 = "cluster"
+    propagate_at_launch = true
+    value               = "test"
+  }
+  tag {
+    key                 = "test"
+    propagate_at_launch = true
+    value               = "tag"
+  }
+  vpc_zone_identifier = [aws_subnet.test-sg.id]
+}
+
+terraform {
+  required_version = ">= 0.12.0"
+}
+`,
+		},
+	}
+
+	doRenderTests(t, "RenderTerraform", cases)
+}
+
+func TestAutoscalingGroupCloudformationRender(t *testing.T) {
+	cases := []*renderTest{
+		{
+			Resource: &AutoscalingGroup{
+				Name:                   fi.String("test1"),
+				LaunchTemplate:         &LaunchTemplate{Name: fi.String("test_lt")},
+				MaxSize:                fi.Int64(10),
+				Metrics:                []string{"test"},
+				MinSize:                fi.Int64(5),
+				MixedInstanceOverrides: []string{"t2.medium", "t2.large"},
+				MixedOnDemandBase:      fi.Int64(4),
+				MixedOnDemandAboveBase: fi.Int64(30),
+				Subnets: []*Subnet{
+					{
+						Name: fi.String("test-sg"),
+						ID:   fi.String("sg-1111"),
+					},
+				},
+				Tags: map[string]string{
+					"test":    "tag",
+					"cluster": "test",
+				},
+			},
+			Expected: `{
+  "Resources": {
+    "AWSAutoScalingAutoScalingGrouptest1": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "AutoScalingGroupName": "test1",
+        "MaxSize": 10,
+        "MinSize": 5,
+        "VPCZoneIdentifier": [
+          {
+            "Ref": "AWSEC2Subnettestsg"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "cluster",
+            "Value": "test",
+            "PropagateAtLaunch": true
+          },
+          {
+            "Key": "test",
+            "Value": "tag",
+            "PropagateAtLaunch": true
+          }
+        ],
+        "MetricsCollection": [
+          {
+            "Granularity": null,
+            "Metrics": [
+              "test"
+            ]
+          }
+        ],
+        "MixedInstancesPolicy": {
+          "LaunchTemplate": {
+            "LaunchTemplateSpecification": {
+              "LaunchTemplateId": {
+                "Ref": "AWSEC2LaunchTemplatetest_lt"
+              },
+              "Version": {
+                "Fn::GetAtt": [
+                  "AWSEC2LaunchTemplatetest_lt",
+                  "LatestVersionNumber"
+                ]
+              }
+            },
+            "Overrides": [
+              {
+                "InstanceType": "t2.medium"
+              },
+              {
+                "InstanceType": "t2.large"
+              }
+            ]
+          },
+          "InstancesDistribution": {
+            "OnDemandBaseCapacity": 4,
+            "OnDemandPercentageAboveBaseCapacity": 30
+          }
+        }
+      }
+    }
+  }
+}`,
+		},
+	}
+
+	doRenderTests(t, "RenderCloudformation", cases)
 }

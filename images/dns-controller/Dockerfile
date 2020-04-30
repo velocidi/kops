@@ -1,4 +1,4 @@
-# Copyright 2016 The Kubernetes Authors.
+# Copyright 2019 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,5 +20,7 @@ RUN apt-get update && apt-get install --yes ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 COPY /.build/artifacts/dns-controller /usr/bin/dns-controller
+
+USER 1000
 
 CMD /usr/bin/dns-controller

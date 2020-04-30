@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 func TestFlagToFalse(t *testing.T) {
@@ -30,7 +30,7 @@ func TestFlagToFalse(t *testing.T) {
 	}
 
 	// Really just to force a dependency on glog, so that we can pass -v and -logtostderr to go test
-	glog.Infof("Created flag Unittest1")
+	klog.Info("Created flag Unittest1")
 
 	ParseFlags("-UnitTest1")
 	if f.Enabled() {

@@ -129,7 +129,7 @@ def file_passes(filename, refs, regexs):
 def file_extension(filename):
     return os.path.splitext(filename)[1].split(".")[-1].lower()
 
-skipped_dirs = ['Godeps', 'third_party', '_gopath', '_output', '.git', 'cluster/env.sh',
+skipped_dirs = ['third_party', '_gopath', '_output', '.git', 'cluster/env.sh',
                 "vendor", "test/e2e/generated/bindata.go", "hack/boilerplate/test",
                 "pkg/generated/bindata.go"]
 
@@ -176,7 +176,7 @@ def get_regexs():
     # Search for "YEAR" which exists in the boilerplate, but shouldn't in the real thing
     regexs["year"] = re.compile( 'YEAR' )
     # dates can be 2014, 2015, 2016, or 2017; company holder names can be anything
-    regexs["date"] = re.compile( '(2014|2015|2016|2017|2018)' )
+    regexs["date"] = re.compile( '(2014|2015|2016|2017|2018|2019|2020|2021|2022)' )
     # strip // +build \n\n build constraints
     regexs["go_build_constraints"] = re.compile(r"^(// \+build.*\n)+\n", re.MULTILINE)
     # strip #!.* from shell scripts

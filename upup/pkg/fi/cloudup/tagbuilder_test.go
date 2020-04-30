@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -79,14 +79,6 @@ func TestBuildTags_CloudProvider_AWS_Weave(t *testing.T) {
 		t.Fatal("tag _aws not found")
 	}
 
-	if !tags.Has("_networking_cni") {
-		t.Fatal("tag _networking_cni not found")
-	}
-
-	if tags.Has("_networking_kubenet") {
-		t.Fatal("tag _networking_kubenet found")
-	}
-
 	nodeUpTags, err := buildNodeupTags(api.InstanceGroupRoleNode, c, tags)
 	if err != nil {
 		t.Fatalf("buildNodeupTags error: %v", err)
@@ -111,14 +103,6 @@ func TestBuildTags_CloudProvider_AWS_Flannel(t *testing.T) {
 
 	if !tags.Has("_aws") {
 		t.Fatal("tag _aws not found")
-	}
-
-	if !tags.Has("_networking_cni") {
-		t.Fatal("tag _networking_cni not found")
-	}
-
-	if tags.Has("_networking_kubenet") {
-		t.Fatal("tag _networking_kubenet found")
 	}
 
 	nodeUpTags, err := buildNodeupTags(api.InstanceGroupRoleNode, c, tags)
@@ -147,14 +131,6 @@ func TestBuildTags_CloudProvider_AWS_Calico(t *testing.T) {
 		t.Fatal("tag _aws not found")
 	}
 
-	if !tags.Has("_networking_cni") {
-		t.Fatal("tag _networking_cni not found")
-	}
-
-	if tags.Has("_networking_kubenet") {
-		t.Fatal("tag _networking_kubenet found")
-	}
-
 	nodeUpTags, err := buildNodeupTags(api.InstanceGroupRoleNode, c, tags)
 	if err != nil {
 		t.Fatalf("buildNodeupTags error: %v", err)
@@ -179,14 +155,6 @@ func TestBuildTags_CloudProvider_AWS_Canal(t *testing.T) {
 
 	if !tags.Has("_aws") {
 		t.Fatal("tag _aws not found")
-	}
-
-	if !tags.Has("_networking_cni") {
-		t.Fatal("tag _networking_cni not found")
-	}
-
-	if tags.Has("_networking_kubenet") {
-		t.Fatal("tag _networking_kubenet found")
 	}
 
 	nodeUpTags, err := buildNodeupTags(api.InstanceGroupRoleNode, c, tags)
@@ -215,14 +183,6 @@ func TestBuildTags_CloudProvider_AWS_Romana(t *testing.T) {
 		t.Fatal("tag _aws not found")
 	}
 
-	if !tags.Has("_networking_cni") {
-		t.Fatal("tag _networking_cni not found")
-	}
-
-	if tags.Has("_networking_kubenet") {
-		t.Fatal("tag _networking_kubenet found")
-	}
-
 	nodeUpTags, err := buildNodeupTags(api.InstanceGroupRoleNode, c, tags)
 	if err != nil {
 		t.Fatalf("buildNodeupTags error: %v", err)
@@ -246,10 +206,6 @@ func TestBuildTags_CloudProvider_AWS(t *testing.T) {
 		t.Fatal("tag _aws not found")
 	}
 
-	if !tags.Has("_networking_cni") {
-		t.Fatal("tag _networking_cni not found")
-	}
-
 	nodeUpTags, err := buildNodeupTags(api.InstanceGroupRoleNode, c, tags)
 	if err != nil {
 		t.Fatalf("buildNodeupTags error: %v", err)
@@ -262,10 +218,9 @@ func TestBuildTags_CloudProvider_AWS(t *testing.T) {
 
 func TestBuildTags_KubernetesVersions(t *testing.T) {
 	grid := map[string]string{
-		"1.3.7":         "_k8s_1_3",
-		"v1.4.0-beta.8": "_k8s_1_4",
-		"1.5.0":         "_k8s_1_5",
-		"https://storage.googleapis.com/kubernetes-release-dev/ci/v1.4.0-alpha.2.677+ea69570f61af8e/": "_k8s_1_4",
+		"v1.14.0-beta.8": "_k8s_1_6",
+		"1.15.0":         "_k8s_1_6",
+		"https://storage.googleapis.com/kubernetes-release-dev/ci/v1.14.0-alpha.2.677+ea69570f61af8e/": "_k8s_1_6",
 	}
 	for version, tag := range grid {
 		c := buildCluster(ClusterParams{KubernetesVersion: version})
@@ -331,14 +286,6 @@ func TestBuildTags_CloudProvider_AWS_Cilium(t *testing.T) {
 
 	if !tags.Has("_aws") {
 		t.Fatal("tag _aws not found")
-	}
-
-	if !tags.Has("_networking_cni") {
-		t.Fatal("tag _networking_cni not found")
-	}
-
-	if tags.Has("_networking_kubenet") {
-		t.Fatal("tag _networking_kubenet found")
 	}
 
 	nodeUpTags, err := buildNodeupTags(api.InstanceGroupRoleNode, c, tags)

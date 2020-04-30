@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,9 +23,9 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 
-	api "k8s.io/kops/pkg/apis/kops"
+	kopsapi "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/util"
 	"k8s.io/kops/pkg/apis/kops/validation"
 	"k8s.io/kops/pkg/assets"
@@ -33,27 +33,25 @@ import (
 	"k8s.io/kops/pkg/dns"
 	"k8s.io/kops/pkg/model"
 	"k8s.io/kops/pkg/model/components"
+	"k8s.io/kops/pkg/model/components/etcdmanager"
+	nodeauthorizer "k8s.io/kops/pkg/model/components/node-authorizer"
 	"k8s.io/kops/upup/models"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/loader"
-	"k8s.io/kops/upup/pkg/fi/utils"
+	"k8s.io/kops/util/pkg/reflectutils"
 	"k8s.io/kops/util/pkg/vfs"
 )
 
+// EtcdClusters is a list of the etcd clusters kops creates
 var EtcdClusters = []string{"main", "events"}
 
 type populateClusterSpec struct {
 	// InputCluster is the api object representing the whole cluster, as input by the user
 	// We build it up into a complete config, but we write the values as input
-	InputCluster *api.Cluster
-
-	// ModelStore is the location where models are found
-	ModelStore vfs.Path
-	// Models is a list of cloudup models to apply
-	Models []string
+	InputCluster *kopsapi.Cluster
 
 	// fullCluster holds the built completed cluster spec
-	fullCluster *api.Cluster
+	fullCluster *kopsapi.Cluster
 
 	// assetBuilder holds the AssetBuilder, used to store assets we discover / remap
 	assetBuilder *assets.AssetBuilder
@@ -66,19 +64,12 @@ func findModelStore() (vfs.Path, error) {
 
 // PopulateClusterSpec takes a user-specified cluster spec, and computes the full specification that should be set on the cluster.
 // We do this so that we don't need any real "brains" on the node side.
-func PopulateClusterSpec(clientset simple.Clientset, cluster *api.Cluster, assetBuilder *assets.AssetBuilder) (*api.Cluster, error) {
-	modelStore, err := findModelStore()
-	if err != nil {
-		return nil, err
-	}
-
+func PopulateClusterSpec(clientset simple.Clientset, cluster *kopsapi.Cluster, assetBuilder *assets.AssetBuilder) (*kopsapi.Cluster, error) {
 	c := &populateClusterSpec{
 		InputCluster: cluster,
-		ModelStore:   modelStore,
-		Models:       []string{"config"},
 		assetBuilder: assetBuilder,
 	}
-	err = c.run(clientset)
+	err := c.run(clientset)
 	if err != nil {
 		return nil, err
 	}
@@ -96,14 +87,14 @@ func PopulateClusterSpec(clientset simple.Clientset, cluster *api.Cluster, asset
 // @kris-nova
 //
 func (c *populateClusterSpec) run(clientset simple.Clientset) error {
-	if err := validation.ValidateCluster(c.InputCluster, false); err != nil {
-		return err
+	if errs := validation.ValidateCluster(c.InputCluster, false); len(errs) != 0 {
+		return errs.ToAggregate()
 	}
 
 	// Copy cluster & instance groups, so we can modify them freely
-	cluster := &api.Cluster{}
+	cluster := &kopsapi.Cluster{}
 
-	utils.JsonMergeStruct(cluster, c.InputCluster)
+	reflectutils.JsonMergeStruct(cluster, c.InputCluster)
 
 	err := c.assignSubnets(cluster)
 	if err != nil {
@@ -124,7 +115,7 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 	// Check that instance groups are defined in valid zones
 	{
 		// TODO: Check that instance groups referenced here exist
-		//clusterSubnets := make(map[string]*api.ClusterSubnetSpec)
+		//clusterSubnets := make(map[string]*kopsapi.ClusterSubnetSpec)
 		//for _, subnet := range cluster.Spec.Subnets {
 		//	if clusterSubnets[subnet.Name] != nil {
 		//		return fmt.Errorf("Subnets contained a duplicate value: %v", subnet.Name)
@@ -149,8 +140,8 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 					}
 				}
 
-				etcdInstanceGroups := make(map[string]*api.EtcdMemberSpec)
-				etcdNames := make(map[string]*api.EtcdMemberSpec)
+				etcdInstanceGroups := make(map[string]*kopsapi.EtcdMemberSpec)
+				etcdNames := make(map[string]*kopsapi.EtcdMemberSpec)
 
 				for _, m := range etcd.Members {
 					if etcdNames[m.Name] != nil {
@@ -160,18 +151,19 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 					instanceGroupName := fi.StringValue(m.InstanceGroup)
 
 					if etcdInstanceGroups[instanceGroupName] != nil {
-						glog.Warningf("EtcdMembers are in the same InstanceGroup %q in etcd-cluster %q (fault-tolerance may be reduced)", instanceGroupName, etcd.Name)
+						klog.Warningf("EtcdMembers are in the same InstanceGroup %q in etcd-cluster %q (fault-tolerance may be reduced)", instanceGroupName, etcd.Name)
 					}
 
 					//if clusterSubnets[zone] == nil {
 					//	return fmt.Errorf("EtcdMembers for %q is configured in zone %q, but that is not configured at the k8s-cluster level", etcd.Name, m.Zone)
 					//}
+					etcdNames[m.Name] = m
 					etcdInstanceGroups[instanceGroupName] = m
 				}
 
-				if (len(etcdInstanceGroups) % 2) == 0 {
+				if (len(etcdNames) % 2) == 0 {
 					// Not technically a requirement, but doesn't really make sense to allow
-					return fmt.Errorf("There should be an odd number of master-zones, for etcd's quorum.  Hint: Use --zones and --master-zones to declare node zones and master zones separately.")
+					return fmt.Errorf("there should be an odd number of master-zones, for etcd's quorum.  Hint: Use --zones and --master-zones to declare node zones and master zones separately")
 				}
 			}
 		}
@@ -230,11 +222,9 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 
 	// Normalize k8s version
 	versionWithoutV := strings.TrimSpace(cluster.Spec.KubernetesVersion)
-	if strings.HasPrefix(versionWithoutV, "v") {
-		versionWithoutV = versionWithoutV[1:]
-	}
+	versionWithoutV = strings.TrimPrefix(versionWithoutV, "v")
 	if cluster.Spec.KubernetesVersion != versionWithoutV {
-		glog.V(2).Infof("Normalizing kubernetes version: %q -> %q", cluster.Spec.KubernetesVersion, versionWithoutV)
+		klog.V(2).Infof("Normalizing kubernetes version: %q -> %q", cluster.Spec.KubernetesVersion, versionWithoutV)
 		cluster.Spec.KubernetesVersion = versionWithoutV
 	}
 	cloud, err := BuildCloud(cluster)
@@ -248,7 +238,7 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 			return err
 		}
 
-		dnsType := api.DNSTypePublic
+		dnsType := kopsapi.DNSTypePublic
 		if cluster.Spec.Topology != nil && cluster.Spec.Topology.DNS != nil && cluster.Spec.Topology.DNS.Type != "" {
 			dnsType = cluster.Spec.Topology.DNS.Type
 		}
@@ -258,7 +248,7 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 			return fmt.Errorf("error determining default DNS zone: %v", err)
 		}
 
-		glog.V(2).Infof("Defaulting DNS zone to: %s", dnsZone)
+		klog.V(2).Infof("Defaulting DNS zone to: %s", dnsZone)
 		cluster.Spec.DNSZone = dnsZone
 	}
 
@@ -279,7 +269,10 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 
 	templateFunctions := make(template.FuncMap)
 
-	tf.AddTo(templateFunctions)
+	err = tf.AddTo(templateFunctions, secretStore)
+	if err != nil {
+		return err
+	}
 
 	if cluster.Spec.KubernetesVersion == "" {
 		return fmt.Errorf("KubernetesVersion is required")
@@ -295,26 +288,23 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 		AssetBuilder:      c.assetBuilder,
 	}
 
-	var fileModels []string
 	var codeModels []loader.OptionsBuilder
-	for _, m := range c.Models {
-		switch m {
-		case "config":
+	{
+		{
 			// Note: DefaultOptionsBuilder comes first
 			codeModels = append(codeModels, &components.DefaultsOptionsBuilder{Context: optionsContext})
-			codeModels = append(codeModels, &components.EtcdOptionsBuilder{Context: optionsContext})
+			codeModels = append(codeModels, &components.EtcdOptionsBuilder{OptionsContext: optionsContext})
+			codeModels = append(codeModels, &etcdmanager.EtcdManagerOptionsBuilder{OptionsContext: optionsContext})
+			codeModels = append(codeModels, &nodeauthorizer.OptionsBuilder{Context: optionsContext})
 			codeModels = append(codeModels, &components.KubeAPIServerOptionsBuilder{OptionsContext: optionsContext})
-			codeModels = append(codeModels, &components.DockerOptionsBuilder{Context: optionsContext})
+			codeModels = append(codeModels, &components.DockerOptionsBuilder{OptionsContext: optionsContext})
+			codeModels = append(codeModels, &components.ContainerdOptionsBuilder{OptionsContext: optionsContext})
 			codeModels = append(codeModels, &components.NetworkingOptionsBuilder{Context: optionsContext})
 			codeModels = append(codeModels, &components.KubeDnsOptionsBuilder{Context: optionsContext})
 			codeModels = append(codeModels, &components.KubeletOptionsBuilder{Context: optionsContext})
 			codeModels = append(codeModels, &components.KubeControllerManagerOptionsBuilder{Context: optionsContext})
 			codeModels = append(codeModels, &components.KubeSchedulerOptionsBuilder{OptionsContext: optionsContext})
 			codeModels = append(codeModels, &components.KubeProxyOptionsBuilder{Context: optionsContext})
-			fileModels = append(fileModels, m)
-
-		default:
-			fileModels = append(fileModels, m)
 		}
 	}
 
@@ -323,7 +313,7 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 		Tags:          tags,
 	}
 
-	completed, err := specBuilder.BuildCompleteSpec(&cluster.Spec, c.ModelStore, fileModels)
+	completed, err := specBuilder.BuildCompleteSpec(&cluster.Spec)
 	if err != nil {
 		return fmt.Errorf("error building complete spec: %v", err)
 	}
@@ -332,22 +322,22 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 	completed.Topology = c.InputCluster.Spec.Topology
 	//completed.Topology.Bastion = c.InputCluster.Spec.Topology.Bastion
 
-	fullCluster := &api.Cluster{}
+	fullCluster := &kopsapi.Cluster{}
 	*fullCluster = *cluster
 	fullCluster.Spec = *completed
 	tf.cluster = fullCluster
 
-	if err := validation.ValidateCluster(fullCluster, true); err != nil {
-		return fmt.Errorf("Completed cluster failed validation: %v", err)
+	if errs := validation.ValidateCluster(fullCluster, true); len(errs) != 0 {
+		return fmt.Errorf("Completed cluster failed validation: %v", errs.ToAggregate())
 	}
 
 	c.fullCluster = fullCluster
 	return nil
 }
 
-func (c *populateClusterSpec) assignSubnets(cluster *api.Cluster) error {
+func (c *populateClusterSpec) assignSubnets(cluster *kopsapi.Cluster) error {
 	if cluster.Spec.NonMasqueradeCIDR == "" {
-		glog.Warningf("NonMasqueradeCIDR not set; can't auto-assign dependent subnets")
+		klog.Warningf("NonMasqueradeCIDR not set; can't auto-assign dependent subnets")
 		return nil
 	}
 
@@ -358,7 +348,7 @@ func (c *populateClusterSpec) assignSubnets(cluster *api.Cluster) error {
 	nmOnes, nmBits := nonMasqueradeCIDR.Mask.Size()
 
 	if cluster.Spec.KubeControllerManager == nil {
-		cluster.Spec.KubeControllerManager = &api.KubeControllerManagerConfig{}
+		cluster.Spec.KubeControllerManager = &kopsapi.KubeControllerManagerConfig{}
 	}
 
 	if cluster.Spec.KubeControllerManager.ClusterCIDR == "" {
@@ -377,14 +367,14 @@ func (c *populateClusterSpec) assignSubnets(cluster *api.Cluster) error {
 
 		cidr := net.IPNet{IP: ip, Mask: net.CIDRMask(nmOnes+1, nmBits)}
 		cluster.Spec.KubeControllerManager.ClusterCIDR = cidr.String()
-		glog.V(2).Infof("Defaulted KubeControllerManager.ClusterCIDR to %v", cluster.Spec.KubeControllerManager.ClusterCIDR)
+		klog.V(2).Infof("Defaulted KubeControllerManager.ClusterCIDR to %v", cluster.Spec.KubeControllerManager.ClusterCIDR)
 	}
 
 	if cluster.Spec.ServiceClusterIPRange == "" {
 		// Allocate from the '0' subnet; but only carve off 1/4 of that (i.e. add 1 + 2 bits to the netmask)
 		cidr := net.IPNet{IP: nonMasqueradeCIDR.IP.Mask(nonMasqueradeCIDR.Mask), Mask: net.CIDRMask(nmOnes+3, nmBits)}
 		cluster.Spec.ServiceClusterIPRange = cidr.String()
-		glog.V(2).Infof("Defaulted ServiceClusterIPRange to %v", cluster.Spec.ServiceClusterIPRange)
+		klog.V(2).Infof("Defaulted ServiceClusterIPRange to %v", cluster.Spec.ServiceClusterIPRange)
 	}
 
 	return nil

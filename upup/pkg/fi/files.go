@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 	"path"
 	"strconv"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/util/pkg/hashing"
 )
 
@@ -47,7 +47,7 @@ func WriteFile(destPath string, contents Resource, fileMode os.FileMode, dirMode
 }
 
 func writeFileContents(destPath string, src Resource, fileMode os.FileMode) error {
-	glog.Infof("Writing file %q", destPath)
+	klog.Infof("Writing file %q", destPath)
 
 	out, err := os.OpenFile(destPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, fileMode)
 	if err != nil {
@@ -77,7 +77,7 @@ func EnsureFileMode(destPath string, fileMode os.FileMode) (bool, error) {
 	if (stat.Mode() & os.ModePerm) == fileMode {
 		return changed, nil
 	}
-	glog.Infof("Changing file mode for %q to %s", destPath, fileMode)
+	klog.Infof("Changing file mode for %q to %s", destPath, fileMode)
 
 	err = os.Chmod(destPath, fileMode)
 	if err != nil {
@@ -97,12 +97,11 @@ func fileHasHash(f string, expected *hashing.Hash) (bool, error) {
 	}
 
 	if actual.Equal(expected) {
-		glog.V(2).Infof("Hash matched for %q: %v", f, expected)
+		klog.V(2).Infof("Hash matched for %q: %v", f, expected)
 		return true, nil
-	} else {
-		glog.V(2).Infof("Hash did not match for %q: actual=%v vs expected=%v", f, actual, expected)
-		return false, nil
 	}
+	klog.V(2).Infof("Hash did not match for %q: actual=%v vs expected=%v", f, actual, expected)
+	return false, nil
 }
 
 func ParseFileMode(s string, defaultMode os.FileMode) (os.FileMode, error) {
@@ -131,6 +130,6 @@ func SafeClose(r io.Reader) {
 	}
 	err := closer.Close()
 	if err != nil {
-		glog.Warningf("unexpected error closing stream: %v", err)
+		klog.Warningf("unexpected error closing stream: %v", err)
 	}
 }

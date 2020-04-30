@@ -19,7 +19,7 @@ This document also applies to using the `kops` API to customize a Kubernetes clu
 
 Because of the above statement `kops` includes an API which provides a feature for users to utilize YAML or JSON manifests for managing their `kops` created Kubernetes installations. In the same way that you can use a YAML manifest to deploy a Job, you can deploy and manage a `kops` Kubernetes instance with a manifest. All of these values are also usable via the interactive editor with `kops edit`.
 
-> You can see all the options that are currently supported in Kops [here](https://github.com/kubernetes/kops/blob/master/pkg/apis/kops/componentconfig.go) or [more prettily here](https://godoc.org/k8s.io/kops/pkg/apis/kops#ClusterSpec)
+> You can see all the options that are currently supported in Kops [here](https://github.com/kubernetes/kops/blob/master/pkg/apis/kops/componentconfig.go) or [more prettily here](https://pkg.go.dev/k8s.io/kops/pkg/apis/kops#ClusterSpec)
 
 The following is a list of the benefits of using a file to manage instances.
 
@@ -57,7 +57,7 @@ NOTE: If you run `kops get cluster $NAME -o yaml > $NAME.yaml`, you will only ge
 The following is the contents of the exported YAML file.
 
 ```yaml
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: Cluster
 metadata:
   creationTimestamp: 2017-05-04T23:21:47Z
@@ -134,7 +134,7 @@ spec:
 
 ---
 
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: InstanceGroup
 metadata:
   creationTimestamp: 2017-05-04T23:21:48Z
@@ -155,7 +155,7 @@ spec:
 
 ---
 
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: InstanceGroup
 metadata:
   creationTimestamp: 2017-05-04T23:21:47Z
@@ -174,7 +174,7 @@ spec:
 
 ---
 
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: InstanceGroup
 metadata:
   creationTimestamp: 2017-05-04T23:21:47Z
@@ -193,7 +193,7 @@ spec:
 
 ---
 
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: InstanceGroup
 metadata:
   creationTimestamp: 2017-05-04T23:21:48Z
@@ -212,7 +212,7 @@ spec:
 
 ---
 
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: InstanceGroup
 metadata:
   creationTimestamp: 2017-05-04T23:21:48Z
@@ -233,10 +233,10 @@ spec:
 
 ## YAML Examples
 
-With the above YAML file, a user can add configurations that are not available via the command line. For instance, you can add a `MaxPrice` value to a new instance group and use spot instances. Also add node and cloud labels for the new instance group.
+With the above YAML file, a user can add configurations that are not available via the command line. For instance, you can add a `maxPrice` value to a new instance group and use spot instances. Also add node and cloud labels for the new instance group.
 
 ```yaml
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: InstanceGroup
 metadata:
   creationTimestamp: 2017-05-04T23:21:48Z
@@ -289,7 +289,7 @@ Please refer to the rolling-update [documentation](cli/kops_rolling-update_clust
 ### Cluster Spec
 
 ```yaml
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: Cluster
 metadata:
   creationTimestamp: 2017-05-04T23:21:47Z
@@ -298,14 +298,14 @@ spec:
   api:
 ```
 
-Full documentation is accessible via [godoc](https://godoc.org/k8s.io/kops/pkg/apis/kops#ClusterSpec).
+Full documentation is accessible via [godoc](https://pkg.go.dev/k8s.io/kops/pkg/apis/kops#ClusterSpec).
 
 The `ClusterSpec` allows a user to set configurations for such values as Docker log driver, Kubernetes API server log level, VPC for reusing a VPC (`NetworkID`), and the Kubernetes version.
 
 More information about some of the elements in the `ClusterSpec` is available in the following:
 
 -  Cluster Spec [document](cluster_spec.md) which outlines some of the values in the Cluster Specification.
-- [Ectd Encryption](etcd_backup.md)
+- [Etcd Encryption](operations/etcd_backup_restore_encryption.md)
 - [GPU](gpu.md) setup
 - [IAM Roles](iam_roles.md) - adding additional IAM roles.
 - [Labels](labels.md)
@@ -322,7 +322,7 @@ This command prints the entire YAML configuration. But _do not_ use the full doc
 ### Instance Groups
 
 ```yaml
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: InstanceGroup
 metadata:
   creationTimestamp: 2017-05-04T23:21:48Z
@@ -330,7 +330,7 @@ metadata:
 spec:
 ```
 
-Full documentation is accessible via [godocs](https://godoc.org/k8s.io/kops/pkg/apis/kops#InstanceGroupSpec).
+Full documentation is accessible via [godocs](https://pkg.go.dev/k8s.io/kops/pkg/apis/kops#InstanceGroupSpec).
 
 Instance Groups map to Auto Scaling Groups in AWS, and Instance Groups in GCE. They are an API level description of a group of compute instances used as Masters or Nodes.
 
@@ -342,6 +342,6 @@ Using YAML or JSON-based configuration for building and managing kops clusters i
 
 - If you do not need to define or customize a value, let kops set that value. Setting too many values prevents kops from doing its job in setting up the cluster and you may end up with strange bugs.
 - If you end up with strange bugs, try letting kops do more.
-- Be cautious, take care, and test test test outside of production!
+- Be cautious, take care, and test outside of production!
 
 If you need to run a custom version of Kubernetes Controller Manager, set `kubeControllerManager.image` and update your cluster. This is the beauty of using a manifest for your cluster!

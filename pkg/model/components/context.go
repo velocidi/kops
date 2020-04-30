@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import (
 	"k8s.io/kops/util/pkg/vfs"
 
 	"github.com/blang/semver"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 // OptionsContext is the context object for options builders
@@ -49,6 +49,13 @@ func (c *OptionsContext) IsKubernetesGTE(version string) bool {
 
 func (c *OptionsContext) IsKubernetesLT(version string) bool {
 	return !c.IsKubernetesGTE(version)
+}
+
+// Architecture returns the architecture we are using
+// We currently only support amd64, and we probably need to pass the InstanceGroup in
+// But we can start collecting the architectural dependencies
+func (c *OptionsContext) Architecture() string {
+	return "amd64"
 }
 
 // KubernetesVersion parses the semver version of kubernetes, from the cluster spec
@@ -75,10 +82,13 @@ func UsesKubenet(clusterSpec *kops.ClusterSpec) (bool, error) {
 		return false, nil
 	} else if networking.Kubenet != nil {
 		return true, nil
+	} else if networking.GCE != nil {
+		// GCE IP Alias networking is based on kubenet
+		return true, nil
 	} else if networking.External != nil {
 		// external is based on kubenet
 		return true, nil
-	} else if networking.CNI != nil || networking.Weave != nil || networking.Flannel != nil || networking.Calico != nil || networking.Canal != nil || networking.Kuberouter != nil || networking.Romana != nil || networking.AmazonVPC != nil || networking.Cilium != nil {
+	} else if networking.CNI != nil || networking.Weave != nil || networking.Flannel != nil || networking.Calico != nil || networking.Canal != nil || networking.Kuberouter != nil || networking.Romana != nil || networking.AmazonVPC != nil || networking.Cilium != nil || networking.LyftVPC != nil {
 		return false, nil
 	} else if networking.Kopeio != nil {
 		// Kopeio is based on kubenet / external
@@ -117,7 +127,7 @@ func WellKnownServiceIP(clusterSpec *kops.ClusterSpec, id int) (net.IP, error) {
 		return serviceIP, nil
 	}
 
-	return nil, fmt.Errorf("Unexpected IP address type for ServiceClusterIPRange: %s", clusterSpec.ServiceClusterIPRange)
+	return nil, fmt.Errorf("unexpected IP address type for ServiceClusterIPRange: %s", clusterSpec.ServiceClusterIPRange)
 }
 
 func IsBaseURL(kubernetesVersion string) bool {
@@ -125,14 +135,9 @@ func IsBaseURL(kubernetesVersion string) bool {
 }
 
 // Image returns the docker image name for the specified component
-func Image(component string, clusterSpec *kops.ClusterSpec, assetsBuilder *assets.AssetBuilder) (string, error) {
+func Image(component string, architecture string, clusterSpec *kops.ClusterSpec, assetsBuilder *assets.AssetBuilder) (string, error) {
 	if assetsBuilder == nil {
 		return "", fmt.Errorf("unable to parse assets as assetBuilder is not defined")
-	}
-	// TODO remove this, as it is an addon now
-	if component == "kube-dns" {
-		// TODO: Once we are shipping different versions, start to use them
-		return "k8s.gcr.io/kubedns-amd64:1.3", nil
 	}
 
 	kubernetesVersion, err := k8sversion.Parse(clusterSpec.KubernetesVersion)
@@ -140,8 +145,10 @@ func Image(component string, clusterSpec *kops.ClusterSpec, assetsBuilder *asset
 		return "", err
 	}
 
+	imageName := component
+
 	if !IsBaseURL(clusterSpec.KubernetesVersion) {
-		image := "k8s.gcr.io/" + component + ":" + "v" + kubernetesVersion.String()
+		image := "k8s.gcr.io/" + imageName + ":" + "v" + kubernetesVersion.String()
 
 		image, err := assetsBuilder.RemapImage(image)
 		if err != nil {
@@ -150,21 +157,37 @@ func Image(component string, clusterSpec *kops.ClusterSpec, assetsBuilder *asset
 		return image, nil
 	}
 
+	// The simple name is valid when pulling (before 1.16 it was
+	// only amd64, as of 1.16 it is a manifest list).  But if we
+	// are loading from a tarfile then the image is tagged with
+	// the architecture suffix.
+	//
+	// i.e. k8s.gcr.io/kube-apiserver:v1.16.0 is a manifest list
+	// and we _can_ also pull
+	// k8s.gcr.io/kube-apiserver-amd64:v1.16.0 directly.  But if
+	// we load https://.../v1.16.0/amd64/kube-apiserver.tar then
+	// the image inside that tar file is named
+	// "k8s.gcr.io/kube-apiserver-amd64:v1.16.0"
+	//
+	// But ... this is only the case from 1.16 on...
+	if kubernetesVersion.IsGTE("1.16") {
+		imageName += "-" + architecture
+	}
+
 	baseURL := clusterSpec.KubernetesVersion
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	// TODO path.Join here?
-	tagURL := baseURL + "/bin/linux/amd64/" + component + ".docker_tag"
-	glog.V(2).Infof("Downloading docker tag for %s from: %s", component, tagURL)
+	tagURL := baseURL + "/bin/linux/" + architecture + "/" + component + ".docker_tag"
+	klog.V(2).Infof("Downloading docker tag for %s from: %s", component, tagURL)
 
 	b, err := vfs.Context.ReadFile(tagURL)
 	if err != nil {
 		return "", fmt.Errorf("error reading tag file %q: %v", tagURL, err)
 	}
 	tag := strings.TrimSpace(string(b))
-	glog.V(2).Infof("Found tag %q for %q", tag, component)
+	klog.V(2).Infof("Found tag %q for %q", tag, component)
 
-	image := "k8s.gcr.io/" + component + ":" + tag
+	image := "k8s.gcr.io/" + imageName + ":" + tag
 
 	// When we're using a docker load-ed image, we are likely a CI build.
 	// But the k8s.gcr.io prefix is an alias, and we only double-tagged from 1.10 onwards.

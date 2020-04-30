@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,12 +30,17 @@ import (
 	"k8s.io/kops/upup/pkg/fi/nodeup/local"
 	"k8s.io/kops/upup/pkg/fi/utils"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
-const FileType_Symlink = "symlink"
-const FileType_Directory = "directory"
-const FileType_File = "file"
+const (
+	// FileType_Symlink defines a symlink
+	FileType_Symlink = "symlink"
+	// FileType_Directory defines a directory
+	FileType_Directory = "directory"
+	// FileType_File is a regular file
+	FileType_File = "file"
+)
 
 type File struct {
 	AfterFiles      []string    `json:"afterfiles,omitempty"`
@@ -84,7 +89,7 @@ func (e *File) GetDependencies(tasks map[string]fi.Task) []fi.Task {
 		ownerTask := tasks["user/"+*e.Owner]
 		if ownerTask == nil {
 			// The user might be a pre-existing user (e.g. admin)
-			glog.Warningf("Unable to find task %q", "user/"+*e.Owner)
+			klog.Warningf("Unable to find task %q", "user/"+*e.Owner)
 		} else {
 			deps = append(deps, ownerTask)
 		}
@@ -100,9 +105,7 @@ func (e *File) GetDependencies(tasks map[string]fi.Task) []fi.Task {
 	}
 
 	// Requires parent directories to be created
-	for _, v := range findCreatesDirParents(e.Path, tasks) {
-		deps = append(deps, v)
-	}
+	deps = append(deps, findCreatesDirParents(e.Path, tasks)...)
 
 	// Requires other files to be created first
 	for _, f := range e.AfterFiles {
@@ -125,7 +128,7 @@ func (f *File) GetName() *string {
 }
 
 func (f *File) SetName(name string) {
-	glog.Fatalf("SetName not supported for File task")
+	klog.Fatalf("SetName not supported for File task")
 }
 
 func (f *File) String() string {
@@ -230,7 +233,7 @@ func (_ *File) RenderLocal(t *local.LocalTarget, a, e, changes *File) error {
 
 	if a != nil {
 		if e.IfNotExists {
-			glog.V(2).Infof("file exists and IfNotExists set; skipping %q", e.Path)
+			klog.V(2).Infof("file exists and IfNotExists set; skipping %q", e.Path)
 			return nil
 		}
 	}
@@ -240,7 +243,7 @@ func (_ *File) RenderLocal(t *local.LocalTarget, a, e, changes *File) error {
 		if changes.Symlink != nil {
 			// This will currently fail if the target already exists.
 			// That's probably a good thing for now ... it is hard to know what to do here!
-			glog.Infof("Creating symlink %q -> %q", e.Path, *changes.Symlink)
+			klog.Infof("Creating symlink %q -> %q", e.Path, *changes.Symlink)
 			err := os.Symlink(*changes.Symlink, e.Path)
 			if err != nil {
 				return fmt.Errorf("error creating symlink %q -> %q: %v", e.Path, *changes.Symlink, err)
@@ -293,7 +296,7 @@ func (_ *File) RenderLocal(t *local.LocalTarget, a, e, changes *File) error {
 		for _, args := range e.OnChangeExecute {
 			human := strings.Join(args, " ")
 
-			glog.Infof("Changed; will execute OnChangeExecute command: %q", human)
+			klog.Infof("Changed; will execute OnChangeExecute command: %q", human)
 
 			cmd := exec.Command(args[0], args[1:]...)
 			output, err := cmd.CombinedOutput()
@@ -310,7 +313,7 @@ func (_ *File) RenderCloudInit(t *cloudinit.CloudInitTarget, a, e, changes *File
 	dirMode := os.FileMode(0755)
 	fileMode, err := fi.ParseFileMode(fi.StringValue(e.Mode), 0644)
 	if err != nil {
-		return fmt.Errorf("invalid file mode for %q: %q", e.Path, e.Mode)
+		return fmt.Errorf("invalid file mode for %s: %q", e.Path, *e.Mode)
 	}
 
 	if e.Type == FileType_Symlink {

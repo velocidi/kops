@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package dns
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -24,11 +25,8 @@ import (
 	"strings"
 
 	"github.com/digitalocean/godo"
-	"github.com/digitalocean/godo/context"
-
-	"github.com/golang/glog"
-
 	"golang.org/x/oauth2"
+	"k8s.io/klog"
 
 	"k8s.io/kops/dns-controller/pkg/dns"
 	"k8s.io/kops/dnsprovider/pkg/dnsprovider"
@@ -74,7 +72,7 @@ func newClient() (*godo.Client, error) {
 		AccessToken: accessToken,
 	}
 
-	oauthClient := oauth2.NewClient(oauth2.NoContext, tokenSource)
+	oauthClient := oauth2.NewClient(context.TODO(), tokenSource)
 	return godo.NewClient(oauthClient), nil
 }
 
@@ -307,7 +305,7 @@ func (r *resourceRecordChangeset) Remove(rrset dnsprovider.ResourceRecordSet) dn
 	return r
 }
 
-// Upsert adds a new resource record set to the list of upesrts to apply
+// Upsert adds a new resource record set to the list of upserts to apply
 func (r *resourceRecordChangeset) Upsert(rrset dnsprovider.ResourceRecordSet) dnsprovider.ResourceRecordChangeset {
 	r.upserts = append(r.upserts, rrset)
 	return r
@@ -316,9 +314,9 @@ func (r *resourceRecordChangeset) Upsert(rrset dnsprovider.ResourceRecordSet) dn
 // Apply adds new records stored in r.additions, updates records stored
 // in r.upserts and deletes records stored in r.removals
 func (r *resourceRecordChangeset) Apply() error {
-	glog.V(2).Infof("applying changes in record change set")
+	klog.V(2).Info("applying changes in record change set")
 	if r.IsEmpty() {
-		glog.V(2).Infof("record change set is empty")
+		klog.V(2).Info("record change set is empty")
 		return nil
 	}
 
@@ -330,7 +328,7 @@ func (r *resourceRecordChangeset) Apply() error {
 			}
 		}
 
-		glog.V(2).Infof("record change set additions complete")
+		klog.V(2).Info("record change set additions complete")
 	}
 
 	if len(r.upserts) > 0 {
@@ -341,7 +339,7 @@ func (r *resourceRecordChangeset) Apply() error {
 			}
 		}
 
-		glog.V(2).Infof("record change set upserts complete")
+		klog.V(2).Info("record change set upserts complete")
 	}
 
 	if len(r.removals) > 0 {
@@ -361,10 +359,10 @@ func (r *resourceRecordChangeset) Apply() error {
 			}
 		}
 
-		glog.V(2).Infof("record change set removals complete")
+		klog.V(2).Info("record change set removals complete")
 	}
 
-	glog.V(2).Infof("record change sets successfully applied")
+	klog.V(2).Info("record change sets successfully applied")
 	return nil
 }
 
@@ -377,7 +375,7 @@ func (r *resourceRecordChangeset) IsEmpty() bool {
 	return false
 }
 
-// ResourceRecordSet returns the associated resourceRecordSets of a changset
+// ResourceRecordSet returns the associated resourceRecordSets of a changeset
 func (r *resourceRecordChangeset) ResourceRecordSets() dnsprovider.ResourceRecordSets {
 	return r.rrsets
 }
@@ -501,16 +499,6 @@ func createRecord(c *godo.Client, zoneName string, createRequest *godo.DomainRec
 	_, _, err := c.Domains.CreateRecord(context.TODO(), zoneName, createRequest)
 	if err != nil {
 		return fmt.Errorf("error creating record: %v", err)
-	}
-
-	return nil
-}
-
-// editRecord edits a record given an associated ozone and a godo.DomainRecordEditRequest
-func editRecord(c *godo.Client, zoneName string, recordID int, editRequest *godo.DomainRecordEditRequest) error {
-	_, _, err := c.Domains.EditRecord(context.TODO(), zoneName, recordID, editRequest)
-	if err != nil {
-		return fmt.Errorf("error editing record: %v", err)
 	}
 
 	return nil

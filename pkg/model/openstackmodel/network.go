@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,34 +34,68 @@ var _ fi.ModelBuilder = &NetworkModelBuilder{}
 func (b *NetworkModelBuilder) Build(c *fi.ModelBuilderContext) error {
 	clusterName := b.ClusterName()
 
+	netName, err := b.GetNetworkName()
+	if err != nil {
+		return err
+	}
 	{
 		t := &openstacktasks.Network{
-			Name:      s(clusterName),
+			Name:      s(netName),
 			ID:        s(b.Cluster.Spec.NetworkID),
+			Tag:       s(clusterName),
 			Lifecycle: b.Lifecycle,
 		}
 
 		c.AddTask(t)
 	}
 
-	{
-		t := &openstacktasks.Router{
-			Name:      s(strings.Replace(clusterName, ".", "-", -1)),
-			Lifecycle: b.Lifecycle,
-		}
-
-		c.AddTask(t)
-	}
-
+	needRouter := true
+	routerName := strings.Replace(clusterName, ".", "-", -1)
 	for _, sp := range b.Cluster.Spec.Subnets {
+		// assumes that we do not need to create routers if we use existing subnets
+		if sp.ProviderID != "" {
+			needRouter = false
+		}
+		subnetName, err := b.findSubnetNameByID(sp.ProviderID, sp.Name)
+		if err != nil {
+			return err
+		}
 		t := &openstacktasks.Subnet{
-			Name:      s(sp.Name),
-			Network:   b.LinkToNetwork(),
-			CIDR:      s(sp.CIDR),
-			Lifecycle: b.Lifecycle,
+			Name:       s(subnetName),
+			Network:    b.LinkToNetwork(),
+			CIDR:       s(sp.CIDR),
+			DNSServers: make([]*string, 0),
+			Lifecycle:  b.Lifecycle,
+			Tag:        s(clusterName),
+		}
+		if b.Cluster.Spec.CloudConfig.Openstack.Router != nil && b.Cluster.Spec.CloudConfig.Openstack.Router.DNSServers != nil {
+			dnsSplitted := strings.Split(fi.StringValue(b.Cluster.Spec.CloudConfig.Openstack.Router.DNSServers), ",")
+			dnsNameSrv := make([]*string, len(dnsSplitted))
+			for i, ns := range dnsSplitted {
+				dnsNameSrv[i] = fi.String(ns)
+			}
+			t.DNSServers = dnsNameSrv
 		}
 		c.AddTask(t)
+
+		if needRouter {
+			t1 := &openstacktasks.RouterInterface{
+				Name:      s("ri-" + sp.Name),
+				Subnet:    b.LinkToSubnet(s(subnetName)),
+				Router:    b.LinkToRouter(s(routerName)),
+				Lifecycle: b.Lifecycle,
+			}
+			c.AddTask(t1)
+		}
 	}
 
+	if needRouter {
+		t := &openstacktasks.Router{
+			Name:      s(routerName),
+			Lifecycle: b.Lifecycle,
+		}
+
+		c.AddTask(t)
+	}
 	return nil
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,24 +19,18 @@ package k8scodecs
 import (
 	"bytes"
 	"fmt"
-	"os"
 
-	"github.com/golang/glog"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apimachinery/announced"
-	"k8s.io/apimachinery/pkg/apimachinery/registered"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/klog"
 )
 
 var Scheme = runtime.NewScheme()
 var Codecs = serializer.NewCodecFactory(Scheme)
 var ParameterCodec = runtime.NewParameterCodec(Scheme)
-
-var Registry = registered.NewOrDie(os.Getenv("KUBE_API_VERSIONS"))
-var GroupFactoryRegistry = make(announced.APIGroupFactoryRegistry)
 
 func init() {
 	metav1.AddToGroupVersion(Scheme, schema.GroupVersion{Version: "v1"})
@@ -46,7 +40,7 @@ func init() {
 func encoder() runtime.Encoder {
 	yaml, ok := runtime.SerializerInfoForMediaType(Codecs.SupportedMediaTypes(), "application/yaml")
 	if !ok {
-		glog.Fatalf("no YAML serializer registered")
+		klog.Fatalf("no YAML serializer registered")
 	}
 	gv := corev1.SchemeGroupVersion
 	return Codecs.EncoderForVersion(yaml.Serializer, gv)

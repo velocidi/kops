@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,10 +27,12 @@ import (
 
 	"github.com/ghodss/yaml"
 	"github.com/spf13/cobra"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
+	"k8s.io/helm/pkg/strvals"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 
 	"k8s.io/kops/cmd/kops/util"
+	"k8s.io/kops/pkg/try"
 	"k8s.io/kops/pkg/util/templater"
 	"k8s.io/kops/upup/pkg/fi/utils"
 )
@@ -45,6 +47,7 @@ var (
 
 	kops toolbox template \
 		--values values.yaml --values=another.yaml \
+		--set var=value --set-string othervar=true \
 		--snippets file_or_directory --snippets=another.dir \
 		--template file_or_directory --template=directory  \
 		--output cluster.yaml
@@ -63,6 +66,8 @@ type toolboxTemplateOption struct {
 	outputPath    string
 	snippetsPath  []string
 	templatePath  []string
+	values        []string
+	stringValues  []string
 }
 
 // NewCmdToolboxTemplate returns a new templating command
@@ -87,6 +92,8 @@ func NewCmdToolboxTemplate(f *util.Factory, out io.Writer) *cobra.Command {
 	}
 
 	cmd.Flags().StringSliceVar(&options.configPath, "values", options.configPath, "Path to a configuration file containing values to include in template")
+	cmd.Flags().StringArrayVar(&options.values, "set", options.values, "Set values on the command line (can specify multiple or separate values with commas: key1=val1,key2=val2)")
+	cmd.Flags().StringArrayVar(&options.stringValues, "set-string", options.stringValues, "Set STRING values on the command line (can specify multiple or separate values with commas: key1=val1,key2=val2)")
 	cmd.Flags().StringSliceVar(&options.templatePath, "template", options.templatePath, "Path to template file or directory of templates to render")
 	cmd.Flags().StringSliceVar(&options.snippetsPath, "snippets", options.snippetsPath, "Path to directory containing snippets used for templating")
 	cmd.Flags().StringVar(&options.outputPath, "output", options.outputPath, "Path to output file, otherwise defaults to stdout")
@@ -100,11 +107,18 @@ func NewCmdToolboxTemplate(f *util.Factory, out io.Writer) *cobra.Command {
 // runToolBoxTemplate is the action for the command
 func runToolBoxTemplate(f *util.Factory, out io.Writer, options *toolboxTemplateOption) error {
 	// @step: read in the configuration if any
-	context, err := newTemplateContext(options.configPath)
+	context, err := newTemplateContext(options.configPath, options.values, options.stringValues)
 	if err != nil {
 		return err
 	}
-	context["clusterName"] = options.clusterName
+
+	// @step: set clusterName from template's values or cli flag
+	value, ok := context["clusterName"].(string)
+	if ok {
+		options.clusterName = value
+	} else {
+		context["clusterName"] = options.clusterName
+	}
 
 	// @check if we are just rendering the config value
 	if options.configValue != "" {
@@ -128,7 +142,7 @@ func runToolBoxTemplate(f *util.Factory, out io.Writer, options *toolboxTemplate
 		templates = append(templates, list...)
 	}
 
-	snippets := make(map[string]string, 0)
+	snippets := make(map[string]string)
 	for _, x := range options.snippetsPath {
 		list, err := expandFiles(utils.ExpandPath(x))
 		if err != nil {
@@ -177,7 +191,7 @@ func runToolBoxTemplate(f *util.Factory, out io.Writer, options *toolboxTemplate
 			}
 			formatted, err := yaml.Marshal(&data)
 			if err != nil {
-				return fmt.Errorf("unable to marhshal formated content to yaml: %s", err)
+				return fmt.Errorf("unable to marhshal formatted content to yaml: %s", err)
 			}
 			documents = append(documents, string(formatted))
 		}
@@ -192,7 +206,7 @@ func runToolBoxTemplate(f *util.Factory, out io.Writer, options *toolboxTemplate
 		if err != nil {
 			return fmt.Errorf("unable to open file: %s, error: %v", options.outputPath, err)
 		}
-		defer w.Close()
+		defer try.CloseFile(w)
 		iowriter = w
 	}
 
@@ -203,9 +217,9 @@ func runToolBoxTemplate(f *util.Factory, out io.Writer, options *toolboxTemplate
 	return nil
 }
 
-// newTemplateContext is responsible for loadding the --values and build a context for the template
-func newTemplateContext(files []string) (map[string]interface{}, error) {
-	context := make(map[string]interface{}, 0)
+// newTemplateContext is responsible for loading the --values and build a context for the template
+func newTemplateContext(files []string, values []string, stringValues []string) (map[string]interface{}, error) {
+	context := make(map[string]interface{})
 
 	for _, x := range files {
 		list, err := expandFiles(utils.ExpandPath(x))
@@ -218,12 +232,26 @@ func newTemplateContext(files []string) (map[string]interface{}, error) {
 				return nil, fmt.Errorf("unable to configuration file: %s, error: %s", j, err)
 			}
 
-			ctx := make(map[string]interface{}, 0)
+			ctx := make(map[string]interface{})
 			if err := utils.YamlUnmarshal(content, &ctx); err != nil {
 				return nil, fmt.Errorf("unable decode the configuration file: %s, error: %v", j, err)
 			}
 
 			context = mergeValues(context, ctx)
+		}
+	}
+
+	// User specified a value via --set
+	for _, value := range values {
+		if err := strvals.ParseInto(value, context); err != nil {
+			return nil, fmt.Errorf("failed parsing --set data: %s", err)
+		}
+	}
+
+	// User specified a value via --set-string
+	for _, value := range stringValues {
+		if err := strvals.ParseIntoString(value, context); err != nil {
+			return nil, fmt.Errorf("failed parsing --set-string data: %s", err)
 		}
 	}
 

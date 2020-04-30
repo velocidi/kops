@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/util/pkg/hashing"
 )
 
@@ -102,7 +102,7 @@ func IsClusterReadable(p Path) bool {
 	}
 
 	switch p.(type) {
-	case *S3Path, *GSPath, *SwiftPath, *OSSPath:
+	case *S3Path, *GSPath, *SwiftPath, *OSSPath, *FSPath:
 		return true
 
 	case *KubernetesPath:
@@ -111,14 +111,11 @@ func IsClusterReadable(p Path) bool {
 	case *SSHPath:
 		return false
 
-	case *FSPath:
-		return false
-
 	case *MemFSPath:
 		return false
 
 	default:
-		glog.Fatalf("IsClusterReadable not implemented for type %T", p)
+		klog.Fatalf("IsClusterReadable not implemented for type %T", p)
 		return false
 	}
 }

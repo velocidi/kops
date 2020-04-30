@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,88 +29,73 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
-func Bool(b bool) *bool {
-	return &b
-}
-
-// DNSPreCreate controls whether we pre-create DNS records.
-var DNSPreCreate = New("DNSPreCreate", Bool(true))
-
-// DrainAndValidateRollingUpdate if set will use new rolling update code that will drain and validate.
-var DrainAndValidateRollingUpdate = New("DrainAndValidateRollingUpdate", Bool(true))
-
-// VPCSkipEnableDNSSupport if set will make that a VPC does not need DNSSupport enabled.
-var VPCSkipEnableDNSSupport = New("VPCSkipEnableDNSSupport", Bool(false))
-
-// SkipTerraformFormat if set will mean that we will not `tf fmt` the generated terraform.
-var SkipTerraformFormat = New("SkipTerraformFormat", Bool(false))
-
-var VSphereCloudProvider = New("VSphereCloudProvider", Bool(false))
-
-var EnableExternalDNS = New("EnableExternalDNS", Bool(false))
-
-//EnableExternalCloudController toggles the use of cloud-controller-manager introduced in v1.7
-var EnableExternalCloudController = New("EnableExternalCloudController", Bool(false))
-
-// EnableSeparateConfigBase allows a config-base that is different from the state store
-var EnableSeparateConfigBase = New("EnableSeparateConfigBase", Bool(false))
-
-// SpecOverrideFlag allows setting spec values on create
-var SpecOverrideFlag = New("SpecOverrideFlag", Bool(false))
-
-// GoogleCloudBucketAcl means the ACL will be set on a bucket when using GCS
-// In particular, this is the only (?) way to grant the bucket.list permission
-// However we should no longer need it, with the keyset.yaml fix
-var GoogleCloudBucketAcl = New("GoogleCloudBucketAcl", Bool(false))
-
-var flags = make(map[string]*FeatureFlag)
-var flagsMutex sync.Mutex
+const (
+	// Name is the name of the environment variable which encapsulates feature flags
+	Name = "KOPS_FEATURE_FLAGS"
+)
 
 func init() {
-	ParseFlags(os.Getenv("KOPS_FEATURE_FLAGS"))
+	ParseFlags(os.Getenv(Name))
 }
 
+var (
+	flags      = make(map[string]*FeatureFlag)
+	flagsMutex sync.Mutex
+)
+
+var (
+	// DNSPreCreate controls whether we pre-create DNS records.
+	DNSPreCreate = New("DNSPreCreate", Bool(true))
+	// EnableLaunchTemplates indicates we wish to switch to using launch templates rather than launchconfigurations
+	EnableLaunchTemplates = New("EnableLaunchTemplates", Bool(false))
+	//EnableExternalCloudController toggles the use of cloud-controller-manager introduced in v1.7
+	EnableExternalCloudController = New("EnableExternalCloudController", Bool(false))
+	// EnableExternalDNS enables external DNS
+	EnableExternalDNS = New("EnableExternalDNS", Bool(false))
+	// EnableNodeAuthorization enables the node authorization features
+	EnableNodeAuthorization = New("EnableNodeAuthorization", Bool(false))
+	// EnableSeparateConfigBase allows a config-base that is different from the state store
+	EnableSeparateConfigBase = New("EnableSeparateConfigBase", Bool(false))
+	// ExperimentalClusterDNS allows for setting the kubelet dns flag to experimental values.
+	ExperimentalClusterDNS = New("ExperimentalClusterDNS", Bool(false))
+	// GoogleCloudBucketACL means the ACL will be set on a bucket when using GCS
+	GoogleCloudBucketACL = New("GoogleCloudBucketAcl", Bool(false))
+	// KeepLaunchConfigurations can be set to prevent garbage collection of old launch configurations
+	KeepLaunchConfigurations = New("KeepLaunchConfigurations", Bool(false))
+	// SkipTerraformFormat if set means we will not `tf fmt` the generated terraform.
+	// However we should no longer need it, with the keyset.yaml fix
+	// In particular, this is the only (?) way to grant the bucket.list permission
+	// It allows for experiments with alternative DNS configurations - in particular local proxies.
+	SkipTerraformFormat = New("SkipTerraformFormat", Bool(false))
+	// SpecOverrideFlag allows setting spec values on create
+	SpecOverrideFlag = New("SpecOverrideFlag", Bool(false))
+	// Spotinst toggles the use of Spotinst integration.
+	Spotinst = New("Spotinst", Bool(false))
+	// SpotinstOcean toggles the use of Spotinst Ocean instance group implementation.
+	SpotinstOcean = New("SpotinstOcean", Bool(false))
+	// VPCSkipEnableDNSSupport if set will make that a VPC does not need DNSSupport enabled.
+	VPCSkipEnableDNSSupport = New("VPCSkipEnableDNSSupport", Bool(false))
+	// VSphereCloudProvider enables the vsphere cloud provider
+	VSphereCloudProvider = New("VSphereCloudProvider", Bool(false))
+	// SkipEtcdVersionCheck will bypass the check that etcd-manager is using a supported etcd version
+	SkipEtcdVersionCheck = New("SkipEtcdVersionCheck", Bool(false))
+	// TerraformJSON outputs terraform in JSON instead of hcl output. JSON output can be also parsed by terraform 0.12
+	TerraformJSON = New("TerraformJSON", Bool(false))
+	// Terraform012 will output terraform in the 0.12 (hcl2) syntax
+	Terraform012 = New("Terraform-0.12", Bool(true))
+)
+
+// FeatureFlag defines a feature flag
 type FeatureFlag struct {
 	Key          string
 	enabled      *bool
 	defaultValue *bool
 }
 
-func (f *FeatureFlag) Enabled() bool {
-	if f.enabled != nil {
-		return *f.enabled
-	}
-	if f.defaultValue != nil {
-		return *f.defaultValue
-	}
-	return false
-}
-
-func ParseFlags(f string) {
-	f = strings.TrimSpace(f)
-	for _, s := range strings.Split(f, ",") {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		enabled := true
-		var ff *FeatureFlag
-		if s[0] == '+' || s[0] == '-' {
-			ff = New(s[1:], nil)
-			if s[0] == '-' {
-				enabled = false
-			}
-		} else {
-			ff = New(s, nil)
-		}
-		glog.Infof("FeatureFlag %q=%v", ff.Key, enabled)
-		ff.enabled = &enabled
-	}
-}
-
+// New creates a new feature flag
 func New(key string, defaultValue *bool) *FeatureFlag {
 	flagsMutex.Lock()
 	defer flagsMutex.Unlock()
@@ -128,4 +113,43 @@ func New(key string, defaultValue *bool) *FeatureFlag {
 	}
 
 	return f
+}
+
+// Enabled checks if the flag is enabled
+func (f *FeatureFlag) Enabled() bool {
+	if f.enabled != nil {
+		return *f.enabled
+	}
+	if f.defaultValue != nil {
+		return *f.defaultValue
+	}
+	return false
+}
+
+// Bool returns a pointer to the boolean value
+func Bool(b bool) *bool {
+	return &b
+}
+
+// ParseFlags responsible for parse out the feature flag usage
+func ParseFlags(f string) {
+	f = strings.TrimSpace(f)
+	for _, s := range strings.Split(f, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		enabled := true
+		var ff *FeatureFlag
+		if s[0] == '+' || s[0] == '-' {
+			ff = New(s[1:], nil)
+			if s[0] == '-' {
+				enabled = false
+			}
+		} else {
+			ff = New(s, nil)
+		}
+		klog.Infof("FeatureFlag %q=%v", ff.Key, enabled)
+		ff.enabled = &enabled
+	}
 }

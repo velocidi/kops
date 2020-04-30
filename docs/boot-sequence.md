@@ -50,6 +50,10 @@ On nodes:
 
 * kube-proxy (which configures iptables so that the k8s-network will work)
 
+It is possible to add custom static pods by using `fileAssets` in the
+cluster spec. This might be useful for any custom bootstraping that
+doesn't fit into `additionalUserData` or `hooks`.
+
 ## kubelet start
 
 Kubelet starts up, starts (and restarts) all the containers in /etc/kubernetes/manifests.
@@ -94,6 +98,7 @@ means we don't need to manage etcd directly.  We just try to make sure that some
 each volume mounted with etcd running and DNS set correctly.  That is the job of protokube.
 
 Protokube:
+
 * discovers EBS volumes that hold etcd data (using tags)
 * tries to safe_format_and_mount them
 * if successful in mounting the volume, it will write a manifest for etcd into /etc/kubernetes/manifests

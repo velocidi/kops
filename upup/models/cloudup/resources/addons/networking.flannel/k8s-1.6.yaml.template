@@ -60,12 +60,22 @@ data:
   cni-conf.json: |
     {
       "name": "cbr0",
-      "type": "flannel",
-      "delegate": {
-        "forceAddress": true,
-        "isDefaultGateway": true,
-        "hairpinMode": true
-      }
+      "plugins": [
+        {
+          "type": "flannel",
+          "delegate": {
+            "forceAddress": true,
+            "isDefaultGateway": true,
+            "hairpinMode": true
+          }
+        },
+        {
+          "type": "portmap",
+          "capabilities": {
+            "portMappings": true
+          }
+        }
+      ]
     }
   net-conf.json: |
     {
@@ -99,13 +109,13 @@ spec:
       - operator: Exists
       initContainers:
       - name: install-cni
-        image: quay.io/coreos/flannel:v0.9.1-amd64
+        image: quay.io/coreos/flannel:v0.11.0-amd64
         command:
         - cp
         args:
         - -f
         - /etc/kube-flannel/cni-conf.json
-        - /etc/cni/net.d/10-flannel.conf
+        - /etc/cni/net.d/10-flannel.conflist
         volumeMounts:
         - name: cni
           mountPath: /etc/cni/net.d
@@ -113,8 +123,12 @@ spec:
           mountPath: /etc/kube-flannel/
       containers:
       - name: kube-flannel
-        image: quay.io/coreos/flannel:v0.9.1-amd64
-        command: [ "/opt/bin/flanneld", "--ip-masq", "--kube-subnet-mgr" ]
+        image: quay.io/coreos/flannel:v0.11.0-amd64
+        command:
+        - "/opt/bin/flanneld"
+        - "--ip-masq"
+        - "--kube-subnet-mgr"
+        - "--iptables-resync={{- or .Networking.Flannel.IptablesResyncSeconds "5" }}"
         securityContext:
           privileged: true
         env:

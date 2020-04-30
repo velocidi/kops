@@ -19,14 +19,14 @@ package gcetasks
 import (
 	"fmt"
 
-	"github.com/golang/glog"
 	"google.golang.org/api/storage/v1"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
 )
 
-// StorageObjectAcl represents an ACL rule on a google cloud storage storage object
+// StorageObjectAcl represents an ACL rule on a google cloud storage object
 //go:generate fitask -type=StorageObjectAcl
 type StorageObjectAcl struct {
 	Name      *string
@@ -52,7 +52,7 @@ func (e *StorageObjectAcl) Find(c *fi.Context) (*StorageObjectAcl, error) {
 	object := fi.StringValue(e.Object)
 	entity := fi.StringValue(e.Entity)
 
-	glog.V(2).Infof("Checking GCS object ACL for gs://%s/%s for %s", bucket, object, entity)
+	klog.V(2).Infof("Checking GCS object ACL for gs://%s/%s for %s", bucket, object, entity)
 	r, err := cloud.Storage().ObjectAccessControls.Get(bucket, object, entity).Do()
 	if err != nil {
 		if gce.IsNotFound(err) {
@@ -104,14 +104,14 @@ func (_ *StorageObjectAcl) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Storage
 	}
 
 	if a == nil {
-		glog.V(2).Infof("Creating GCS object ACL for gs://%s/%s for %s as %s", bucket, object, entity, role)
+		klog.V(2).Infof("Creating GCS object ACL for gs://%s/%s for %s as %s", bucket, object, entity, role)
 
 		_, err := t.Cloud.Storage().ObjectAccessControls.Insert(bucket, object, acl).Do()
 		if err != nil {
 			return fmt.Errorf("error creating GCS object ACL for gs://%s/%s for %s as %s: %v", bucket, object, entity, role, err)
 		}
 	} else {
-		glog.V(2).Infof("Updating GCS object ACL for gs://%s/%s for %s as %s", bucket, object, entity, role)
+		klog.V(2).Infof("Updating GCS object ACL for gs://%s/%s for %s as %s", bucket, object, entity, role)
 
 		_, err := t.Cloud.Storage().ObjectAccessControls.Update(bucket, object, entity, acl).Do()
 		if err != nil {
@@ -124,9 +124,9 @@ func (_ *StorageObjectAcl) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Storage
 
 // terraformStorageObjectAcl is the model for a terraform google_storage_object_acl rule
 type terraformStorageObjectAcl struct {
-	Bucket     string   `json:"bucket,omitempty"`
-	Object     string   `json:"object,omitempty"`
-	RoleEntity []string `json:"role_entity,omitempty"`
+	Bucket     string   `json:"bucket,omitempty" cty:"bucket"`
+	Object     string   `json:"object,omitempty" cty:"object"`
+	RoleEntity []string `json:"role_entity,omitempty" cty:"role_entity"`
 }
 
 func (_ *StorageObjectAcl) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *StorageObjectAcl) error {

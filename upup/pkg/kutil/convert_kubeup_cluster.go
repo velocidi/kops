@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,13 +17,14 @@ limitations under the License.
 package kutil
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops"
 	api "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/registry"
@@ -50,7 +51,7 @@ type ConvertKubeupCluster struct {
 	Channel *api.Channel
 }
 
-func (x *ConvertKubeupCluster) Upgrade() error {
+func (x *ConvertKubeupCluster) Upgrade(ctx context.Context) error {
 	awsCloud := x.Cloud.(awsup.AWSCloud)
 
 	cluster := x.ClusterConfig
@@ -168,7 +169,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 	// Stop autoscalingGroups
 	for _, group := range autoscalingGroups {
 		name := aws.StringValue(group.AutoScalingGroupName)
-		glog.Infof("Stopping instances in autoscaling group %q", name)
+		klog.Infof("Stopping instances in autoscaling group %q", name)
 
 		request := &autoscaling.UpdateAutoScalingGroupInput{
 			AutoScalingGroupName: group.AutoScalingGroupName,
@@ -191,11 +192,11 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 
 		masterState := aws.StringValue(master.State.Name)
 		if masterState == "terminated" {
-			glog.Infof("master already terminated: %q", masterInstanceID)
+			klog.Infof("master already terminated: %q", masterInstanceID)
 			continue
 		}
 
-		glog.Infof("Stopping master: %q", masterInstanceID)
+		klog.Infof("Stopping master: %q", masterInstanceID)
 
 		request := &ec2.StopInstancesInput{
 			InstanceIds: []*string{master.InstanceId},
@@ -227,9 +228,9 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 					state := aws.StringValue(instance.State.Name)
 					switch state {
 					case "terminated", "stopped":
-						glog.Infof("instance %v no longer running (%v)", id, state)
+						klog.Infof("instance %v no longer running (%v)", id, state)
 					default:
-						glog.Infof("waiting for instance %v to stop (currently %v)", id, state)
+						klog.Infof("waiting for instance %v to stop (currently %v)", id, state)
 						allStopped = false
 					}
 				}
@@ -250,7 +251,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 			}
 			volumeID := aws.StringValue(bdm.Ebs.VolumeId)
 			masterInstanceID := aws.StringValue(master.InstanceId)
-			glog.Infof("Detaching volume %q from instance %q", volumeID, masterInstanceID)
+			klog.Infof("Detaching volume %q from instance %q", volumeID, masterInstanceID)
 
 			request := &ec2.DetachVolumeInput{
 				VolumeId:   bdm.Ebs.VolumeId,
@@ -261,14 +262,13 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 				_, err := awsCloud.EC2().DetachVolume(request)
 				if err != nil {
 					if awsup.AWSErrorCode(err) == "IncorrectState" {
-						glog.Infof("will retry volume detach (master has probably not stopped yet): %q", err)
+						klog.Infof("will retry volume detach (master has probably not stopped yet): %q", err)
 						time.Sleep(5 * time.Second)
 						continue
 					}
 					return fmt.Errorf("error detaching volume %q from master instance %q: %v", volumeID, masterInstanceID, err)
-				} else {
-					break
 				}
+				break
 			}
 		}
 	}
@@ -293,7 +293,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 				replaceTags := make(map[string]string)
 				replaceTags[awsup.TagClusterName] = newClusterName
 
-				glog.Infof("Retagging VPC %q", vpcID)
+				klog.Infof("Retagging VPC %q", vpcID)
 
 				err := awsCloud.CreateTags(vpcID, replaceTags)
 				if err != nil {
@@ -328,7 +328,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 					replaceTags := make(map[string]string)
 					replaceTags[awsup.TagClusterName] = newClusterName
 
-					glog.Infof("Retagging InternetGateway %q", id)
+					klog.Infof("Retagging InternetGateway %q", id)
 
 					err := awsCloud.CreateTags(id, replaceTags)
 					if err != nil {
@@ -343,7 +343,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 	for _, s := range subnets {
 		id := aws.StringValue(s.SubnetId)
 
-		glog.Infof("Retagging Subnet %q", id)
+		klog.Infof("Retagging Subnet %q", id)
 
 		err := awsCloud.AddAWSTags(id, newTags)
 		if err != nil {
@@ -366,7 +366,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 			// As otherwise we don't attach the route table because the subnet is considered shared
 			replaceTags["Name"] = newClusterName
 
-			glog.Infof("Retagging RouteTable %q", id)
+			klog.Infof("Retagging RouteTable %q", id)
 
 			err := awsCloud.CreateTags(id, replaceTags)
 			if err != nil {
@@ -379,7 +379,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 	for _, s := range securityGroups {
 		id := aws.StringValue(s.GroupId)
 
-		glog.Infof("Retagging SecurityGroup %q", id)
+		klog.Infof("Retagging SecurityGroup %q", id)
 
 		err := awsCloud.AddAWSTags(id, newTags)
 		if err != nil {
@@ -400,7 +400,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 			replaceTags := make(map[string]string)
 			replaceTags[awsup.TagClusterName] = newClusterName
 
-			glog.Infof("Retagging DHCPOptions %q", id)
+			klog.Infof("Retagging DHCPOptions %q", id)
 
 			err := awsCloud.CreateTags(id, replaceTags)
 			if err != nil {
@@ -418,7 +418,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 		replaceTags := make(map[string]string)
 		replaceTags[awsup.TagClusterName] = newClusterName
 
-		glog.Infof("Retagging ELB %q", id)
+		klog.Infof("Retagging ELB %q", id)
 		err := awsCloud.CreateELBTags(id, replaceTags)
 		if err != nil {
 			return fmt.Errorf("error re-tagging ELB %q: %v", id, err)
@@ -434,7 +434,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 			replaceTags := make(map[string]string)
 			replaceTags[awsup.TagClusterName] = newClusterName
 
-			glog.Infof("Retagging ELB security group %q", id)
+			klog.Infof("Retagging ELB security group %q", id)
 			err := awsCloud.CreateTags(id, replaceTags)
 			if err != nil {
 				return fmt.Errorf("error re-tagging ELB security group %q: %v", id, err)
@@ -453,19 +453,19 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 
 		name, _ := awsup.FindEC2Tag(volume.Tags, "Name")
 		if name == oldClusterName+"-master-pd" {
-			glog.Infof("Found master volume %q: %s", id, name)
+			klog.Infof("Found master volume %q: %s", id, name)
 
 			az := aws.StringValue(volume.AvailabilityZone)
 			replaceTags["Name"] = az + ".etcd-main." + newClusterName
 		}
-		glog.Infof("Retagging volume %q", id)
+		klog.Infof("Retagging volume %q", id)
 		err := awsCloud.CreateTags(id, replaceTags)
 		if err != nil {
 			return fmt.Errorf("error re-tagging volume %q: %v", id, err)
 		}
 	}
 
-	err = registry.CreateClusterConfig(x.Clientset, cluster, x.InstanceGroups)
+	err = registry.CreateClusterConfig(ctx, x.Clientset, cluster, x.InstanceGroups)
 	if err != nil {
 		return fmt.Errorf("error writing updated configuration: %v", err)
 	}

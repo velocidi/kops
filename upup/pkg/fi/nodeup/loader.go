@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,15 +31,14 @@ import (
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
 	"k8s.io/kops/util/pkg/vfs"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 type Loader struct {
 	Builders []fi.ModelBuilder
 
-	templates []*template.Template
-	config    *nodeup.Config
-	cluster   *api.Cluster
+	config  *nodeup.Config
+	cluster *api.Cluster
 
 	assets *fi.AssetStore
 	tasks  map[string]fi.Task
@@ -143,13 +142,13 @@ func (l *Loader) Build(baseDir vfs.Path) (map[string]fi.Task, error) {
 	// If there is a package task, we need an update packages task
 	for _, t := range l.tasks {
 		if _, ok := t.(*nodetasks.Package); ok {
-			glog.Infof("Package task found; adding UpdatePackages task")
+			klog.Infof("Package task found; adding UpdatePackages task")
 			l.tasks["UpdatePackages"] = nodetasks.NewUpdatePackages()
 			break
 		}
 	}
 	if l.tasks["UpdatePackages"] == nil {
-		glog.Infof("No package task found; won't update packages")
+		klog.Infof("No package task found; won't update packages")
 	}
 
 	return l.tasks, nil
@@ -254,7 +253,7 @@ func (l *Loader) handleFile(i *loader.TreeWalkItem) error {
 		task.Type = defaultFileType
 	}
 
-	glog.V(2).Infof("path %q -> task %v", i.Path, task)
+	klog.V(2).Infof("path %q -> task %v", i.Path, task)
 
 	if task != nil {
 		key := "file/" + i.RelativePath

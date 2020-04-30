@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -114,7 +114,7 @@ func indentContent(indent int, content string) string {
 	return b.String()
 }
 
-// includenSnippet is responsible for including a snippet
+// includeSnippet is responsible for including a snippet
 func includeSnippet(tm *template.Template, name string, context map[string]interface{}) (string, error) {
 	b := bytes.NewBufferString("")
 	if err := tm.ExecuteTemplate(b, name, context); err != nil {

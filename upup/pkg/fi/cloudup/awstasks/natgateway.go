@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
@@ -148,7 +148,7 @@ func (e *NatGateway) findNatGateway(c *fi.Context) (*ec2.NatGateway, error) {
 		var filters []*ec2.Filter
 		filters = append(filters, awsup.NewEC2Filter("key", "AssociatedNatgateway"))
 		if e.Subnet.ID == nil {
-			glog.V(2).Infof("Unable to find subnet, bypassing Find() for NatGateway")
+			klog.V(2).Infof("Unable to find subnet, bypassing Find() for NatGateway")
 			return nil, nil
 		}
 		filters = append(filters, awsup.NewEC2Filter("resource-id", *e.Subnet.ID))
@@ -171,7 +171,7 @@ func (e *NatGateway) findNatGateway(c *fi.Context) (*ec2.NatGateway, error) {
 		}
 		t := response.Tags[0]
 		id = t.Value
-		glog.V(2).Infof("Found NatGateway via subnet tag: %v", *id)
+		klog.V(2).Infof("Found NatGateway via subnet tag: %v", *id)
 	}
 
 	if id != nil {
@@ -186,15 +186,15 @@ func findNatGatewayById(cloud awsup.AWSCloud, id *string) (*ec2.NatGateway, erro
 	request.NatGatewayIds = []*string{id}
 	response, err := cloud.EC2().DescribeNatGateways(request)
 	if err != nil {
-		return nil, fmt.Errorf("error listing NatGateway %q: %v", id, err)
+		return nil, fmt.Errorf("error listing NatGateway %q: %v", aws.StringValue(id), err)
 	}
 
 	if response == nil || len(response.NatGateways) == 0 {
-		glog.V(2).Infof("Unable to find NatGateway %q", id)
+		klog.V(2).Infof("Unable to find NatGateway %q", aws.StringValue(id))
 		return nil, nil
 	}
 	if len(response.NatGateways) != 1 {
-		return nil, fmt.Errorf("found multiple NatGateways with id %q", id)
+		return nil, fmt.Errorf("found multiple NatGateways with id %q", aws.StringValue(id))
 	}
 	return response.NatGateways[0], nil
 }
@@ -202,7 +202,7 @@ func findNatGatewayById(cloud awsup.AWSCloud, id *string) (*ec2.NatGateway, erro
 func findNatGatewayFromRouteTable(cloud awsup.AWSCloud, routeTable *RouteTable) (*ec2.NatGateway, error) {
 	// Find via route on private route table
 	if routeTable.ID != nil {
-		glog.V(2).Infof("trying to match NatGateway via RouteTable %s", *routeTable.ID)
+		klog.V(2).Infof("trying to match NatGateway via RouteTable %s", *routeTable.ID)
 		rt, err := findRouteTableByID(cloud, *routeTable.ID)
 		if err != nil {
 			return nil, fmt.Errorf("error finding associated RouteTable to NatGateway: %v", err)
@@ -217,7 +217,7 @@ func findNatGatewayFromRouteTable(cloud awsup.AWSCloud, routeTable *RouteTable) 
 			}
 
 			if len(natGatewayIDs) == 0 {
-				glog.V(2).Infof("no NatGateway found in route table %s", *rt.RouteTableId)
+				klog.V(2).Infof("no NatGateway found in route table %s", *rt.RouteTableId)
 			} else if len(natGatewayIDs) > 1 {
 				return nil, fmt.Errorf("found multiple NatGateways in route table %s", *rt.RouteTableId)
 			} else {
@@ -280,10 +280,10 @@ func (e *NatGateway) waitAvailable(cloud awsup.AWSCloud) error {
 
 	id := aws.StringValue(e.ID)
 	if id == "" {
-		return fmt.Errorf("NAT Gateway %q did not have ID", e.Name)
+		return fmt.Errorf("NAT Gateway %q did not have ID", aws.StringValue(e.Name))
 	}
 
-	glog.Infof("Waiting for NAT Gateway %q to be available (this often takes about 5 minutes)", id)
+	klog.Infof("Waiting for NAT Gateway %q to be available (this often takes about 5 minutes)", id)
 	params := &ec2.DescribeNatGatewaysInput{
 		NatGatewayIds: []*string{e.ID},
 	}
@@ -305,7 +305,7 @@ func (_ *NatGateway) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *NatGateway)
 			return fmt.Errorf("NAT gateway %q not found", fi.StringValue(e.ID))
 		}
 
-		glog.V(2).Infof("Creating Nat Gateway")
+		klog.V(2).Infof("Creating Nat Gateway")
 
 		request := &ec2.CreateNatGatewayInput{}
 		request.AllocationId = e.ElasticIP.ID
@@ -349,7 +349,7 @@ func (_ *NatGateway) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *NatGateway)
 		if e.AssociatedRouteTable == nil {
 			return fmt.Errorf("AssociatedRouteTable not provided")
 		}
-		glog.V(2).Infof("tagging route table %s to track shared NGW", fi.StringValue(e.AssociatedRouteTable.ID))
+		klog.V(2).Infof("tagging route table %s to track shared NGW", fi.StringValue(e.AssociatedRouteTable.ID))
 		err = t.AddAWSTags(fi.StringValue(e.AssociatedRouteTable.ID), tags)
 		if err != nil {
 			return fmt.Errorf("unable to tag route table %v", err)
@@ -360,9 +360,9 @@ func (_ *NatGateway) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *NatGateway)
 }
 
 type terraformNATGateway struct {
-	AllocationID *terraform.Literal `json:"allocation_id,omitempty"`
-	SubnetID     *terraform.Literal `json:"subnet_id,omitempty"`
-	Tag          map[string]string  `json:"tags,omitempty"`
+	AllocationID *terraform.Literal `json:"allocation_id,omitempty" cty:"allocation_id"`
+	SubnetID     *terraform.Literal `json:"subnet_id,omitempty" cty:"subnet_id"`
+	Tag          map[string]string  `json:"tags,omitempty" cty:"tags"`
 }
 
 func (_ *NatGateway) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *NatGateway) error {
@@ -371,7 +371,7 @@ func (_ *NatGateway) RenderTerraform(t *terraform.TerraformTarget, a, e, changes
 			return fmt.Errorf("ID must be set, if NatGateway is shared: %s", e)
 		}
 
-		glog.V(4).Infof("reusing existing NatGateway with id %q", *e.ID)
+		klog.V(4).Infof("reusing existing NatGateway with id %q", *e.ID)
 		return nil
 	}
 
@@ -387,7 +387,7 @@ func (_ *NatGateway) RenderTerraform(t *terraform.TerraformTarget, a, e, changes
 func (e *NatGateway) TerraformLink() *terraform.Literal {
 	if fi.BoolValue(e.Shared) {
 		if e.ID == nil {
-			glog.Fatalf("ID must be set, if NatGateway is shared: %s", e)
+			klog.Fatalf("ID must be set, if NatGateway is shared: %s", e)
 		}
 
 		return terraform.LiteralFromStringValue(*e.ID)
@@ -399,7 +399,7 @@ func (e *NatGateway) TerraformLink() *terraform.Literal {
 type cloudformationNATGateway struct {
 	AllocationID *cloudformation.Literal `json:"AllocationId,omitempty"`
 	SubnetID     *cloudformation.Literal `json:"SubnetId,omitempty"`
-	Tag          map[string]string       `json:"tags,omitempty"`
+	Tags         []cloudformationTag     `json:"Tags,omitempty"`
 }
 
 func (_ *NatGateway) RenderCloudformation(t *cloudformation.CloudformationTarget, a, e, changes *NatGateway) error {
@@ -408,23 +408,23 @@ func (_ *NatGateway) RenderCloudformation(t *cloudformation.CloudformationTarget
 			return fmt.Errorf("ID must be set, if NatGateway is shared: %s", e)
 		}
 
-		glog.V(4).Infof("reusing existing NatGateway with id %q", *e.ID)
+		klog.V(4).Infof("reusing existing NatGateway with id %q", *e.ID)
 		return nil
 	}
 
-	tf := &cloudformationNATGateway{
+	cf := &cloudformationNATGateway{
 		AllocationID: e.ElasticIP.CloudformationAllocationID(),
 		SubnetID:     e.Subnet.CloudformationLink(),
-		Tag:          e.Tags,
+		Tags:         buildCloudformationTags(e.Tags),
 	}
 
-	return t.RenderResource("AWS::EC2::NatGateway", *e.Name, tf)
+	return t.RenderResource("AWS::EC2::NatGateway", *e.Name, cf)
 }
 
 func (e *NatGateway) CloudformationLink() *cloudformation.Literal {
 	if fi.BoolValue(e.Shared) {
 		if e.ID == nil {
-			glog.Fatalf("ID must be set, if NatGateway is shared: %s", e)
+			klog.Fatalf("ID must be set, if NatGateway is shared: %s", e)
 		}
 
 		return cloudformation.LiteralString(*e.ID)

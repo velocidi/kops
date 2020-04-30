@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/iam"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/diff"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
@@ -77,7 +77,7 @@ func (e *IAMRole) Find(c *fi.Context) (*IAMRole, error) {
 		actualPolicy := *r.AssumeRolePolicyDocument
 		actualPolicy, err = url.QueryUnescape(actualPolicy)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing AssumeRolePolicyDocument for IAMRole %q: %v", e.Name, err)
+			return nil, fmt.Errorf("error parsing AssumeRolePolicyDocument for IAMRole %s: %v", *e.Name, err)
 		}
 
 		// The RolePolicyDocument is reformatted by AWS
@@ -85,21 +85,21 @@ func (e *IAMRole) Find(c *fi.Context) (*IAMRole, error) {
 		if e.RolePolicyDocument != nil {
 			expectedPolicy, err := e.RolePolicyDocument.AsString()
 			if err != nil {
-				return nil, fmt.Errorf("error reading expected RolePolicyDocument for IAMRole %q: %v", e.Name, err)
+				return nil, fmt.Errorf("error reading expected RolePolicyDocument for IAMRole %q: %v", aws.StringValue(e.Name), err)
 			}
 			expectedJson := make(map[string]interface{})
 			err = json.Unmarshal([]byte(expectedPolicy), &expectedJson)
 			if err != nil {
-				return nil, fmt.Errorf("error parsing expected RolePolicyDocument for IAMRole %q: %v", e.Name, err)
+				return nil, fmt.Errorf("error parsing expected RolePolicyDocument for IAMRole %q: %v", aws.StringValue(e.Name), err)
 			}
 			actualJson := make(map[string]interface{})
 			err = json.Unmarshal([]byte(actualPolicy), &actualJson)
 			if err != nil {
-				return nil, fmt.Errorf("error parsing actual RolePolicyDocument for IAMRole %q: %v", e.Name, err)
+				return nil, fmt.Errorf("error parsing actual RolePolicyDocument for IAMRole %q: %v", aws.StringValue(e.Name), err)
 			}
 
 			if reflect.DeepEqual(actualJson, expectedJson) {
-				glog.V(2).Infof("actual RolePolicyDocument was json-equal to expected; returning expected value")
+				klog.V(2).Infof("actual RolePolicyDocument was json-equal to expected; returning expected value")
 				actualPolicy = expectedPolicy
 			}
 		}
@@ -107,7 +107,7 @@ func (e *IAMRole) Find(c *fi.Context) (*IAMRole, error) {
 		actual.RolePolicyDocument = fi.WrapResource(fi.NewStringResource(actualPolicy))
 	}
 
-	glog.V(2).Infof("found matching IAMRole %q", aws.StringValue(actual.ID))
+	klog.V(2).Infof("found matching IAMRole %q", aws.StringValue(actual.ID))
 	e.ID = actual.ID
 
 	// Avoid spurious changes
@@ -141,7 +141,7 @@ func (_ *IAMRole) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *IAMRole) error
 	}
 
 	if a == nil {
-		glog.V(2).Infof("Creating IAMRole with Name:%q", *e.Name)
+		klog.V(2).Infof("Creating IAMRole with Name:%q", *e.Name)
 
 		request := &iam.CreateRoleInput{}
 		request.AssumeRolePolicyDocument = aws.String(policy)
@@ -155,7 +155,7 @@ func (_ *IAMRole) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *IAMRole) error
 		e.ID = response.Role.RoleId
 	} else {
 		if changes.RolePolicyDocument != nil {
-			glog.V(2).Infof("Updating IAMRole AssumeRolePolicy %q", *e.Name)
+			klog.V(2).Infof("Updating IAMRole AssumeRolePolicy %q", *e.Name)
 
 			var err error
 
@@ -168,10 +168,10 @@ func (_ *IAMRole) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *IAMRole) error
 			}
 
 			if actualPolicy == policy {
-				glog.Warning("Policies were actually the same")
+				klog.Warning("Policies were actually the same")
 			} else {
 				d := diff.FormatDiff(actualPolicy, policy)
-				glog.V(2).Infof("diff: %s", d)
+				klog.V(2).Infof("diff: %s", d)
 			}
 
 			request := &iam.UpdateAssumeRolePolicyInput{}
@@ -190,8 +190,8 @@ func (_ *IAMRole) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *IAMRole) error
 }
 
 type terraformIAMRole struct {
-	Name             *string            `json:"name"`
-	AssumeRolePolicy *terraform.Literal `json:"assume_role_policy"`
+	Name             *string            `json:"name" cty:"name"`
+	AssumeRolePolicy *terraform.Literal `json:"assume_role_policy" cty:"assume_role_policy"`
 }
 
 func (_ *IAMRole) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *IAMRole) error {

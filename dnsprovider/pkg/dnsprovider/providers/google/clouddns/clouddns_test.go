@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -104,11 +104,6 @@ func listRrsOrFail(t *testing.T, rrsets dnsprovider.ResourceRecordSets) []dnspro
 func getExampleRrs(zone dnsprovider.Zone) dnsprovider.ResourceRecordSet {
 	rrsets, _ := zone.ResourceRecordSets()
 	return rrsets.New("www11."+zone.Name(), []string{"10.10.10.10", "169.20.20.20"}, 180, rrstype.A)
-}
-
-func getInvalidRrs(zone dnsprovider.Zone) dnsprovider.ResourceRecordSet {
-	rrsets, _ := zone.ResourceRecordSets()
-	return rrsets.New("www12."+zone.Name(), []string{"rubbish", "rubbish"}, 180, rrstype.A)
 }
 
 func addRrsetOrFail(t *testing.T, rrsets dnsprovider.ResourceRecordSets, rrset dnsprovider.ResourceRecordSet) {

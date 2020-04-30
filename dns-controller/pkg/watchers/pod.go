@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,14 +17,14 @@ limitations under the License.
 package watchers
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 
-	"strings"
-
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -57,37 +57,39 @@ func NewPodController(client kubernetes.Interface, dns dns.Context, namespace st
 
 // Run starts the PodController.
 func (c *PodController) Run() {
-	glog.Infof("starting pod controller")
+	klog.Infof("starting pod controller")
 
 	stopCh := c.StopChannel()
 	go c.runWatcher(stopCh)
 
 	<-stopCh
-	glog.Infof("shutting down pod controller")
+	klog.Infof("shutting down pod controller")
 }
 
 func (c *PodController) runWatcher(stopCh <-chan struct{}) {
 	runOnce := func() (bool, error) {
+		ctx := context.TODO()
+
 		var listOpts metav1.ListOptions
-		glog.V(4).Infof("querying without label filter")
+		klog.V(4).Infof("querying without label filter")
 
 		allKeys := c.scope.AllKeys()
 
-		podList, err := c.client.CoreV1().Pods(c.namespace).List(listOpts)
+		podList, err := c.client.CoreV1().Pods(c.namespace).List(ctx, listOpts)
 		if err != nil {
 			return false, fmt.Errorf("error listing pods: %v", err)
 		}
 		foundKeys := make(map[string]bool)
 		for i := range podList.Items {
 			pod := &podList.Items[i]
-			glog.V(4).Infof("found pod: %v", pod.Name)
+			klog.V(4).Infof("found pod: %v", pod.Name)
 			key := c.updatePodRecords(pod)
 			foundKeys[key] = true
 		}
 		for _, key := range allKeys {
 			if !foundKeys[key] {
 				// The pod previous existed, but no longer exists; delete it from the scope
-				glog.V(2).Infof("removing pod not found in list: %s", key)
+				klog.V(2).Infof("removing pod not found in list: %s", key)
 				c.scope.Replace(key, nil)
 			}
 		}
@@ -95,7 +97,7 @@ func (c *PodController) runWatcher(stopCh <-chan struct{}) {
 
 		listOpts.Watch = true
 		listOpts.ResourceVersion = podList.ResourceVersion
-		watcher, err := c.client.CoreV1().Pods(c.namespace).Watch(listOpts)
+		watcher, err := c.client.CoreV1().Pods(c.namespace).Watch(ctx, listOpts)
 		if err != nil {
 			return false, fmt.Errorf("error watching pods: %v", err)
 		}
@@ -103,16 +105,16 @@ func (c *PodController) runWatcher(stopCh <-chan struct{}) {
 		for {
 			select {
 			case <-stopCh:
-				glog.Infof("Got stop signal")
+				klog.Infof("Got stop signal")
 				return true, nil
 			case event, ok := <-ch:
 				if !ok {
-					glog.Infof("pod watch channel closed")
+					klog.Infof("pod watch channel closed")
 					return false, nil
 				}
 
 				pod := event.Object.(*v1.Pod)
-				glog.V(4).Infof("pod changed: %s %v", event.Type, pod.Name)
+				klog.V(4).Infof("pod changed: %s %v", event.Type, pod.Name)
 
 				switch event.Type {
 				case watch.Added, watch.Modified:
@@ -122,7 +124,7 @@ func (c *PodController) runWatcher(stopCh <-chan struct{}) {
 					c.scope.Replace(pod.Namespace+"/"+pod.Name, nil)
 
 				default:
-					glog.Warningf("Unknown event type: %v", event.Type)
+					klog.Warningf("Unknown event type: %v", event.Type)
 				}
 			}
 		}
@@ -135,7 +137,7 @@ func (c *PodController) runWatcher(stopCh <-chan struct{}) {
 		}
 
 		if err != nil {
-			glog.Warningf("Unexpected error in event watch, will retry: %v", err)
+			klog.Warningf("Unexpected error in event watch, will retry: %v", err)
 			time.Sleep(10 * time.Second)
 		}
 	}
@@ -153,7 +155,7 @@ func (c *PodController) updatePodRecords(pod *v1.Pod) string {
 				aliases = append(aliases, "node/"+pod.Spec.NodeName+"/external")
 			}
 		} else {
-			glog.V(4).Infof("Pod %q had %s=%s, but was not HostNetwork", pod.Name, AnnotationNameDNSExternal, specExternal)
+			klog.V(4).Infof("Pod %q had %s=%s, but was not HostNetwork", pod.Name, AnnotationNameDNSExternal, specExternal)
 		}
 
 		tokens := strings.Split(specExternal, ",")
@@ -170,7 +172,7 @@ func (c *PodController) updatePodRecords(pod *v1.Pod) string {
 			}
 		}
 	} else {
-		glog.V(4).Infof("Pod %q did not have %s annotation", pod.Name, AnnotationNameDNSExternal)
+		klog.V(4).Infof("Pod %q did not have %s annotation", pod.Name, AnnotationNameDNSExternal)
 	}
 
 	specInternal := pod.Annotations[AnnotationNameDNSInternal]
@@ -181,7 +183,7 @@ func (c *PodController) updatePodRecords(pod *v1.Pod) string {
 				ips = append(ips, pod.Status.PodIP)
 			}
 		} else {
-			glog.V(4).Infof("Pod %q had %s=%s, but was not HostNetwork", pod.Name, AnnotationNameDNSInternal, specInternal)
+			klog.V(4).Infof("Pod %q had %s=%s, but was not HostNetwork", pod.Name, AnnotationNameDNSInternal, specInternal)
 		}
 
 		tokens := strings.Split(specInternal, ",")
@@ -198,7 +200,7 @@ func (c *PodController) updatePodRecords(pod *v1.Pod) string {
 			}
 		}
 	} else {
-		glog.V(4).Infof("Pod %q did not have %s label", pod.Name, AnnotationNameDNSInternal)
+		klog.V(4).Infof("Pod %q did not have %s label", pod.Name, AnnotationNameDNSInternal)
 	}
 
 	key := pod.Namespace + "/" + pod.Name

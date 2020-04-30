@@ -20,24 +20,24 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 type visitorBase struct {
 }
 
 func (m *visitorBase) VisitString(path []string, v string, mutator func(string)) error {
-	glog.V(10).Infof("string value at %s: %s", strings.Join(path, "."), v)
+	klog.V(10).Infof("string value at %s: %s", strings.Join(path, "."), v)
 	return nil
 }
 
 func (m *visitorBase) VisitBool(path []string, v bool, mutator func(bool)) error {
-	glog.V(10).Infof("string value at %s: %s", strings.Join(path, "."), v)
+	klog.V(10).Infof("string value at %s: %v", strings.Join(path, "."), v)
 	return nil
 }
 
 func (m *visitorBase) VisitFloat64(path []string, v float64, mutator func(float64)) error {
-	glog.V(10).Infof("float64 value at %s: %s", strings.Join(path, "."), v)
+	klog.V(10).Infof("float64 value at %s: %f", strings.Join(path, "."), v)
 	return nil
 }
 
@@ -48,9 +48,9 @@ type Visitor interface {
 }
 
 func visit(visitor Visitor, data interface{}, path []string, mutator func(interface{})) error {
-	switch data.(type) {
+	switch data := data.(type) {
 	case string:
-		err := visitor.VisitString(path, data.(string), func(v string) {
+		err := visitor.VisitString(path, data, func(v string) {
 			mutator(v)
 		})
 		if err != nil {
@@ -58,7 +58,7 @@ func visit(visitor Visitor, data interface{}, path []string, mutator func(interf
 		}
 
 	case bool:
-		err := visitor.VisitBool(path, data.(bool), func(v bool) {
+		err := visitor.VisitBool(path, data, func(v bool) {
 			mutator(v)
 		})
 		if err != nil {
@@ -66,7 +66,7 @@ func visit(visitor Visitor, data interface{}, path []string, mutator func(interf
 		}
 
 	case float64:
-		err := visitor.VisitFloat64(path, data.(float64), func(v float64) {
+		err := visitor.VisitFloat64(path, data, func(v float64) {
 			mutator(v)
 		})
 		if err != nil {
@@ -74,7 +74,7 @@ func visit(visitor Visitor, data interface{}, path []string, mutator func(interf
 		}
 
 	case map[string]interface{}:
-		m := data.(map[string]interface{})
+		m := data
 		for k, v := range m {
 			path = append(path, k)
 
@@ -88,7 +88,7 @@ func visit(visitor Visitor, data interface{}, path []string, mutator func(interf
 		}
 
 	case []interface{}:
-		s := data.([]interface{})
+		s := data
 		for i, v := range s {
 			path = append(path, fmt.Sprintf("[%d]", i))
 

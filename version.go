@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,8 +18,14 @@ package kops
 
 import "strings"
 
-// Version should be replaced by the makefile
-var Version = "1.7.0"
+// Version can be replaced by build tooling
+var Version = KOPS_RELEASE_VERSION
+
+// These constants are parsed by build tooling - be careful about changing the formats
+const (
+	KOPS_RELEASE_VERSION = "1.18.0-alpha.2"
+	KOPS_CI_VERSION      = "1.18.0-alpha.3"
+)
 
 // GitVersion should be replaced by the makefile
 var GitVersion = ""

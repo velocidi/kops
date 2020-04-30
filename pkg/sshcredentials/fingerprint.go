@@ -21,7 +21,6 @@ import (
 	"crypto/md5"
 	"fmt"
 
-	"github.com/golang/glog"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -50,29 +49,6 @@ func formatFingerprint(data []byte) string {
 			buf.WriteString(":")
 		}
 		buf.WriteString(s)
-	}
-	return buf.String()
-}
-
-func insertFingerprintColons(id string) string {
-	remaining := id
-
-	var buf bytes.Buffer
-	for {
-		if remaining == "" {
-			break
-		}
-		if buf.Len() != 0 {
-			buf.WriteString(":")
-		}
-		if len(remaining) < 2 {
-			glog.Warningf("unexpected format for SSH public key id: %q", id)
-			buf.WriteString(remaining)
-			break
-		} else {
-			buf.WriteString(remaining[0:2])
-			remaining = remaining[2:]
-		}
 	}
 	return buf.String()
 }

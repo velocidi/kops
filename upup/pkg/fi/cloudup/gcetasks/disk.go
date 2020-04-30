@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/golang/glog"
-	compute "google.golang.org/api/compute/v0.beta"
+	compute "google.golang.org/api/compute/v1"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
@@ -146,7 +146,7 @@ func (_ *Disk) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Disk) error {
 		for k, v := range e.Labels {
 			labelsRequest.Labels[k] = v
 		}
-		glog.V(2).Infof("Setting labels on disk %q: %v", disk.Name, labelsRequest.Labels)
+		klog.V(2).Infof("Setting labels on disk %q: %v", disk.Name, labelsRequest.Labels)
 		_, err = t.Cloud.Compute().Disks.SetLabels(t.Cloud.Project(), *e.Zone, disk.Name, labelsRequest).Do()
 		if err != nil {
 			return fmt.Errorf("error setting labels on created Disk: %v", err)
@@ -157,7 +157,7 @@ func (_ *Disk) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Disk) error {
 	if a != nil && changes != nil {
 		empty := &Disk{}
 		if !reflect.DeepEqual(empty, changes) {
-			return fmt.Errorf("Cannot apply changes to Disk: %v", changes)
+			return fmt.Errorf("cannot apply changes to Disk: %v", changes)
 		}
 	}
 
@@ -165,18 +165,30 @@ func (_ *Disk) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Disk) error {
 }
 
 type terraformDisk struct {
-	Name       *string `json:"name"`
-	VolumeType *string `json:"type"`
-	SizeGB     *int64  `json:"size"`
-	Zone       *string `json:"zone"`
+	Name       *string           `json:"name" cty:"name"`
+	VolumeType *string           `json:"type" cty:"type"`
+	SizeGB     *int64            `json:"size" cty:"size"`
+	Zone       *string           `json:"zone" cty:"zone"`
+	Labels     map[string]string `json:"labels,omitempty" cty:"labels"`
 }
 
 func (_ *Disk) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *Disk) error {
+	cloud := t.Cloud.(gce.GCECloud)
+
+	labels := make(map[string]string)
+	for k, v := range cloud.Labels() {
+		labels[k] = v
+	}
+	for k, v := range e.Labels {
+		labels[k] = v
+	}
+
 	tf := &terraformDisk{
 		Name:       e.Name,
 		VolumeType: e.VolumeType,
 		SizeGB:     e.SizeGB,
 		Zone:       e.Zone,
+		Labels:     labels,
 	}
 	return t.RenderResource("google_compute_disk", *e.Name, tf)
 }

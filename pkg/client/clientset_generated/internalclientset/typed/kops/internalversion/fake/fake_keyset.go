@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2020 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ limitations under the License.
 package fake
 
 import (
+	"context"
+
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -34,12 +36,12 @@ type FakeKeysets struct {
 	ns   string
 }
 
-var keysetsResource = schema.GroupVersionResource{Group: "kops", Version: "", Resource: "keysets"}
+var keysetsResource = schema.GroupVersionResource{Group: "kops.k8s.io", Version: "", Resource: "keysets"}
 
-var keysetsKind = schema.GroupVersionKind{Group: "kops", Version: "", Kind: "Keyset"}
+var keysetsKind = schema.GroupVersionKind{Group: "kops.k8s.io", Version: "", Kind: "Keyset"}
 
 // Get takes name of the keyset, and returns the corresponding keyset object, and an error if there is any.
-func (c *FakeKeysets) Get(name string, options v1.GetOptions) (result *kops.Keyset, err error) {
+func (c *FakeKeysets) Get(ctx context.Context, name string, options v1.GetOptions) (result *kops.Keyset, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewGetAction(keysetsResource, c.ns, name), &kops.Keyset{})
 
@@ -50,7 +52,7 @@ func (c *FakeKeysets) Get(name string, options v1.GetOptions) (result *kops.Keys
 }
 
 // List takes label and field selectors, and returns the list of Keysets that match those selectors.
-func (c *FakeKeysets) List(opts v1.ListOptions) (result *kops.KeysetList, err error) {
+func (c *FakeKeysets) List(ctx context.Context, opts v1.ListOptions) (result *kops.KeysetList, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewListAction(keysetsResource, keysetsKind, c.ns, opts), &kops.KeysetList{})
 
@@ -62,7 +64,7 @@ func (c *FakeKeysets) List(opts v1.ListOptions) (result *kops.KeysetList, err er
 	if label == nil {
 		label = labels.Everything()
 	}
-	list := &kops.KeysetList{}
+	list := &kops.KeysetList{ListMeta: obj.(*kops.KeysetList).ListMeta}
 	for _, item := range obj.(*kops.KeysetList).Items {
 		if label.Matches(labels.Set(item.Labels)) {
 			list.Items = append(list.Items, item)
@@ -72,14 +74,14 @@ func (c *FakeKeysets) List(opts v1.ListOptions) (result *kops.KeysetList, err er
 }
 
 // Watch returns a watch.Interface that watches the requested keysets.
-func (c *FakeKeysets) Watch(opts v1.ListOptions) (watch.Interface, error) {
+func (c *FakeKeysets) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 	return c.Fake.
 		InvokesWatch(testing.NewWatchAction(keysetsResource, c.ns, opts))
 
 }
 
 // Create takes the representation of a keyset and creates it.  Returns the server's representation of the keyset, and an error, if there is any.
-func (c *FakeKeysets) Create(keyset *kops.Keyset) (result *kops.Keyset, err error) {
+func (c *FakeKeysets) Create(ctx context.Context, keyset *kops.Keyset, opts v1.CreateOptions) (result *kops.Keyset, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewCreateAction(keysetsResource, c.ns, keyset), &kops.Keyset{})
 
@@ -90,7 +92,7 @@ func (c *FakeKeysets) Create(keyset *kops.Keyset) (result *kops.Keyset, err erro
 }
 
 // Update takes the representation of a keyset and updates it. Returns the server's representation of the keyset, and an error, if there is any.
-func (c *FakeKeysets) Update(keyset *kops.Keyset) (result *kops.Keyset, err error) {
+func (c *FakeKeysets) Update(ctx context.Context, keyset *kops.Keyset, opts v1.UpdateOptions) (result *kops.Keyset, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewUpdateAction(keysetsResource, c.ns, keyset), &kops.Keyset{})
 
@@ -101,7 +103,7 @@ func (c *FakeKeysets) Update(keyset *kops.Keyset) (result *kops.Keyset, err erro
 }
 
 // Delete takes name of the keyset and deletes it. Returns an error if one occurs.
-func (c *FakeKeysets) Delete(name string, options *v1.DeleteOptions) error {
+func (c *FakeKeysets) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
 		Invokes(testing.NewDeleteAction(keysetsResource, c.ns, name), &kops.Keyset{})
 
@@ -109,17 +111,17 @@ func (c *FakeKeysets) Delete(name string, options *v1.DeleteOptions) error {
 }
 
 // DeleteCollection deletes a collection of objects.
-func (c *FakeKeysets) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(keysetsResource, c.ns, listOptions)
+func (c *FakeKeysets) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
+	action := testing.NewDeleteCollectionAction(keysetsResource, c.ns, listOpts)
 
 	_, err := c.Fake.Invokes(action, &kops.KeysetList{})
 	return err
 }
 
 // Patch applies the patch and returns the patched keyset.
-func (c *FakeKeysets) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *kops.Keyset, err error) {
+func (c *FakeKeysets) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *kops.Keyset, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(keysetsResource, c.ns, name, data, subresources...), &kops.Keyset{})
+		Invokes(testing.NewPatchSubresourceAction(keysetsResource, c.ns, name, pt, data, subresources...), &kops.Keyset{})
 
 	if obj == nil {
 		return nil, err

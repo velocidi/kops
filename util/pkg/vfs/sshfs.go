@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,9 +25,9 @@ import (
 	"path"
 	"sync"
 
-	"github.com/golang/glog"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"k8s.io/klog"
 )
 
 type SSHPath struct {
@@ -60,32 +60,30 @@ func (p *SSHPath) newClient() (*sftp.Client, error) {
 		}
 
 		return sftpClient, nil
-	} else {
-		s, err := p.client.NewSession()
-		if err != nil {
-			return nil, fmt.Errorf("error creating sftp client (in new-session): %v", err)
-		}
-
-		//if err := s.R("sftp"); err != nil {
-		//	return nil, fmt.Errorf("error creating sftp client (in new-session): %v", err)
-		//}
-		stdin, err := s.StdinPipe()
-		if err != nil {
-			return nil, fmt.Errorf("error creating sftp client (at stdin pipe): %v", err)
-		}
-		stdout, err := s.StdoutPipe()
-		if err != nil {
-			return nil, fmt.Errorf("error creating sftp client (at stdout pipe): %v", err)
-		}
-
-		err = s.Start("sudo /usr/lib/openssh/sftp-server")
-		if err != nil {
-			return nil, fmt.Errorf("error creating sftp client (executing 'sudo /usr/lib/openssh/sftp-server'): %v", err)
-		}
-
-		return sftp.NewClientPipe(stdout, stdin)
+	}
+	s, err := p.client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("error creating sftp client (in new-session): %v", err)
 	}
 
+	//if err := s.R("sftp"); err != nil {
+	//	return nil, fmt.Errorf("error creating sftp client (in new-session): %v", err)
+	//}
+	stdin, err := s.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("error creating sftp client (at stdin pipe): %v", err)
+	}
+	stdout, err := s.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("error creating sftp client (at stdout pipe): %v", err)
+	}
+
+	err = s.Start("sudo /usr/lib/openssh/sftp-server")
+	if err != nil {
+		return nil, fmt.Errorf("error creating sftp client (executing 'sudo /usr/lib/openssh/sftp-server'): %v", err)
+	}
+
+	return sftp.NewClientPipe(stdout, stdin)
 }
 func (p *SSHPath) Path() string {
 	return "ssh://" + p.server + p.path
@@ -177,11 +175,11 @@ func (p *SSHPath) WriteFile(data io.ReadSeeker, acl ACL) error {
 
 	if err == nil {
 		if acl != nil {
-			sshAcl, ok := acl.(*SSHAcl)
+			sshACL, ok := acl.(*SSHAcl)
 			if !ok {
 				err = fmt.Errorf("unexpected acl type %T", acl)
 			} else {
-				err = sftpClient.Chmod(tempfile, sshAcl.Mode)
+				err = sftpClient.Chmod(tempfile, sshACL.Mode)
 				if err != nil {
 					err = fmt.Errorf("error during chmod of %q: %v", tempfile, err)
 				}
@@ -190,7 +188,8 @@ func (p *SSHPath) WriteFile(data io.ReadSeeker, acl ACL) error {
 	}
 
 	if err == nil {
-		session, err := p.client.NewSession()
+		var session *ssh.Session
+		session, err = p.client.NewSession()
 		if err != nil {
 			err = fmt.Errorf("error creating session for rename: %v", err)
 		} else {
@@ -216,7 +215,7 @@ func (p *SSHPath) WriteFile(data io.ReadSeeker, acl ACL) error {
 
 	// Something went wrong; try to remove the temp file
 	if removeErr := sftpClient.Remove(tempfile); removeErr != nil {
-		glog.Warningf("unable to remove temp file %q: %v", tempfile, removeErr)
+		klog.Warningf("unable to remove temp file %q: %v", tempfile, removeErr)
 	}
 
 	return err
@@ -333,7 +332,7 @@ func (p *SSHPath) Base() string {
 //
 //// scpMkdir executes a mkdir against the SSH target, using SCP
 //func (s *SSHPath) scpMkdir(dest string, mode os.FileMode) error {
-//	glog.V(4).Infof("Doing SSH SCP mkdir: %q", dest)
+//	klog.V(4).Infof("Doing SSH SCP mkdir: %q", dest)
 //	session, err := s.client.NewSession()
 //	if err != nil {
 //		return fmt.Errorf("error establishing SSH session: %v", err)
@@ -355,11 +354,11 @@ func (p *SSHPath) Base() string {
 //	}()
 //	output, err := session.CombinedOutput("/usr/bin/scp -tr " + scpBase)
 //	if err != nil {
-//		glog.Warningf("Error output from SCP: %s", output)
+//		klog.Warningf("Error output from SCP: %s", output)
 //		return fmt.Errorf("error doing SCP mkdir: %v", err)
 //	}
 //	if stdinErr != nil {
-//		glog.Warningf("Error output from SCP: %s", output)
+//		klog.Warningf("Error output from SCP: %s", output)
 //		return fmt.Errorf("error doing SCP mkdir (writing to stdin): %v", stdinErr)
 //	}
 //
@@ -372,7 +371,7 @@ func (p *SSHPath) Base() string {
 //
 //// scpPut copies a file to the SSH target, using SCP
 //func (s *SSHPath) scpPut(dest string, length int, content io.Reader, mode os.FileMode) error {
-//	glog.V(4).Infof("Doing SSH SCP upload: %q", dest)
+//	klog.V(4).Infof("Doing SSH SCP upload: %q", dest)
 //	session, err := s.client.NewSession()
 //	if err != nil {
 //		return fmt.Errorf("error establishing SSH session: %v", err)
@@ -402,11 +401,11 @@ func (p *SSHPath) Base() string {
 //	}()
 //	output, err := session.CombinedOutput("/usr/bin/scp -tr " + scpBase)
 //	if err != nil {
-//		glog.Warningf("Error output from SCP: %s", output)
+//		klog.Warningf("Error output from SCP: %s", output)
 //		return fmt.Errorf("error doing SCP put: %v", err)
 //	}
 //	if stdinErr != nil {
-//		glog.Warningf("Error output from SCP: %s", output)
+//		klog.Warningf("Error output from SCP: %s", output)
 //		return fmt.Errorf("error doing SCP put (writing to stdin): %v", stdinErr)
 //	}
 //

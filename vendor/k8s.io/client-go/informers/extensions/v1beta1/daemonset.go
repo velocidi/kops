@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,9 +19,10 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
 	time "time"
 
-	extensions_v1beta1 "k8s.io/api/extensions/v1beta1"
+	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -61,16 +62,16 @@ func NewFilteredDaemonSetInformer(client kubernetes.Interface, namespace string,
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ExtensionsV1beta1().DaemonSets(namespace).List(options)
+				return client.ExtensionsV1beta1().DaemonSets(namespace).List(context.TODO(), options)
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ExtensionsV1beta1().DaemonSets(namespace).Watch(options)
+				return client.ExtensionsV1beta1().DaemonSets(namespace).Watch(context.TODO(), options)
 			},
 		},
-		&extensions_v1beta1.DaemonSet{},
+		&extensionsv1beta1.DaemonSet{},
 		resyncPeriod,
 		indexers,
 	)
@@ -81,7 +82,7 @@ func (f *daemonSetInformer) defaultInformer(client kubernetes.Interface, resyncP
 }
 
 func (f *daemonSetInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&extensions_v1beta1.DaemonSet{}, f.defaultInformer)
+	return f.factory.InformerFor(&extensionsv1beta1.DaemonSet{}, f.defaultInformer)
 }
 
 func (f *daemonSetInformer) Lister() v1beta1.DaemonSetLister {

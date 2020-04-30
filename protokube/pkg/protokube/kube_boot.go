@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,13 +17,15 @@ limitations under the License.
 package protokube
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"path/filepath"
 	"time"
 
-	"github.com/golang/glog"
-	"k8s.io/kubernetes/pkg/util/mount"
+	"k8s.io/klog"
+	utilexec "k8s.io/utils/exec"
+	"k8s.io/utils/nsenter"
 )
 
 var (
@@ -49,13 +51,21 @@ type KubeBoot struct {
 	DNS DNSProvider
 	// ModelDir is the model directory
 	ModelDir string
+	// Kubernetes holds a kubernetes client
+	Kubernetes *KubernetesContext
+	// Master indicates we are a master node
+	Master bool
+
+	// ManageEtcd is true if we should manage etcd.
+	// Deprecated in favor of etcd-manager.
+	ManageEtcd bool
 	// EtcdBackupImage is the image to use for backing up etcd
 	EtcdBackupImage string
 	// EtcdBackupStore is the VFS path to which we should backup etcd
 	EtcdBackupStore string
 	// Etcd container registry location.
 	EtcdImageSource string
-	// EtcdElectionTimeout is is the leader election timeout
+	// EtcdElectionTimeout is the leader election timeout
 	EtcdElectionTimeout string
 	// EtcdHeartbeatInterval is the heartbeat interval
 	EtcdHeartbeatInterval string
@@ -73,10 +83,14 @@ type KubeBoot struct {
 	PeerCert string
 	// PeerKey is the path to a peer private key for etcd
 	PeerKey string
-	// Kubernetes is the context methods for kubernetes
-	Kubernetes *KubernetesContext
-	// Master indicates we are a master node
-	Master bool
+
+	// BootstrapMasterNodeLabels controls the initial application of node labels to our node
+	// The node is found by matching NodeName
+	BootstrapMasterNodeLabels bool
+
+	// NodeName is the name of our node as it will be registered in k8s.
+	// Used by BootstrapMasterNodeLabels
+	NodeName string
 
 	volumeMounter   *VolumeMountController
 	etcdControllers map[string]*EtcdController
@@ -91,16 +105,17 @@ func (k *KubeBoot) Init(volumesProvider Volumes) {
 // RunSyncLoop is responsible for provision the cluster
 func (k *KubeBoot) RunSyncLoop() {
 	for {
-		if err := k.syncOnce(); err != nil {
-			glog.Warningf("error during attempt to bootstrap (will sleep and retry): %v", err)
+		ctx := context.Background()
+		if err := k.syncOnce(ctx); err != nil {
+			klog.Warningf("error during attempt to bootstrap (will sleep and retry): %v", err)
 		}
 
 		time.Sleep(1 * time.Minute)
 	}
 }
 
-func (k *KubeBoot) syncOnce() error {
-	if k.Master {
+func (k *KubeBoot) syncOnce(ctx context.Context) error {
+	if k.Master && k.ManageEtcd {
 		// attempt to mount the volumes
 		volumes, err := k.volumeMounter.mountMasterVolumes()
 		if err != nil {
@@ -112,10 +127,10 @@ func (k *KubeBoot) syncOnce() error {
 				key := etcdSpec.ClusterKey + "::" + etcdSpec.NodeName
 				etcdController := k.etcdControllers[key]
 				if etcdController == nil {
-					glog.Infof("Found etcd cluster spec on volume %q: %v", v.ID, etcdSpec)
+					klog.Infof("Found etcd cluster spec on volume %q: %v", v.ID, etcdSpec)
 					etcdController, err := newEtcdController(k, v, etcdSpec)
 					if err != nil {
-						glog.Warningf("error building etcd controller: %v", err)
+						klog.Warningf("error building etcd controller: %v", err)
 					} else {
 						k.etcdControllers[key] = etcdController
 						go etcdController.RunSyncLoop()
@@ -123,8 +138,10 @@ func (k *KubeBoot) syncOnce() error {
 				}
 			}
 		}
+	} else if k.ManageEtcd {
+		klog.V(4).Infof("Not in role master; won't scan for volumes")
 	} else {
-		glog.V(4).Infof("Not in role master; won't scan for volumes")
+		klog.V(4).Infof("protokube management of etcd not enabled; won't scan for volumes")
 	}
 
 	// Ensure kubelet is running. We avoid doing this automatically so
@@ -132,23 +149,28 @@ func (k *KubeBoot) syncOnce() error {
 	// and DNS are available, avoiding the scenario where
 	// etcd/apiserver retry too many times and go into backoff.
 	if err := startKubeletService(); err != nil {
-		glog.Warningf("error ensuring kubelet started: %v", err)
+		klog.Warningf("error ensuring kubelet started: %v", err)
 	}
 
 	if k.Master {
+		if k.BootstrapMasterNodeLabels {
+			if err := bootstrapMasterNodeLabels(ctx, k.Kubernetes, k.NodeName); err != nil {
+				klog.Warningf("error bootstrapping master node labels: %v", err)
+			}
+		}
 		if k.ApplyTaints {
-			if err := applyMasterTaints(k.Kubernetes); err != nil {
-				glog.Warningf("error updating master taints: %v", err)
+			if err := applyMasterTaints(ctx, k.Kubernetes); err != nil {
+				klog.Warningf("error updating master taints: %v", err)
 			}
 		}
 		if k.InitializeRBAC {
-			if err := applyRBAC(k.Kubernetes); err != nil {
-				glog.Warningf("error initializing rbac: %v", err)
+			if err := applyRBAC(ctx, k.Kubernetes); err != nil {
+				klog.Warningf("error initializing rbac: %v", err)
 			}
 		}
 		for _, channel := range k.Channels {
 			if err := applyChannel(channel); err != nil {
-				glog.Warningf("error applying channel %q: %v", channel, err)
+				klog.Warningf("error applying channel %q: %v", channel, err)
 			}
 		}
 	}
@@ -160,38 +182,42 @@ func (k *KubeBoot) syncOnce() error {
 func startKubeletService() error {
 	// TODO: Check/log status of kubelet
 	// (in particular, we want to avoid kubernetes/kubernetes#40123 )
-	glog.V(2).Infof("ensuring that kubelet systemd service is running")
+	klog.V(2).Infof("ensuring that kubelet systemd service is running")
 
 	// We run systemctl from the hostfs so we don't need systemd in our image
 	// (and we don't risk version skew)
 
-	exec := mount.NewOsExec()
+	exec := utilexec.New()
 	if Containerized {
-		exec = NewNsEnterExec()
+		e, err := nsenter.NewNsenter(pathFor("/"), utilexec.New())
+		if err != nil {
+			return fmt.Errorf("error building nsenter executor: %v", err)
+		}
+		exec = e
 	}
 
 	systemctlCommand := "systemctl"
 
-	output, err := exec.Run(systemctlCommand, "status", "--no-block", "kubelet")
-	glog.V(2).Infof("'systemctl status kubelet' output:\n%s", string(output))
+	output, err := exec.Command(systemctlCommand, "status", "--no-block", "kubelet").CombinedOutput()
+	klog.V(2).Infof("'systemctl status kubelet' output:\n%s", string(output))
 	if err == nil {
-		glog.V(2).Infof("kubelet systemd service already running")
+		klog.V(2).Infof("kubelet systemd service already running")
 		return nil
 	}
 
-	glog.Infof("kubelet systemd service not running. Starting")
-	output, err = exec.Run(systemctlCommand, "start", "--no-block", "kubelet")
+	klog.Infof("kubelet systemd service not running. Starting")
+	output, err = exec.Command(systemctlCommand, "start", "--no-block", "kubelet").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("error starting kubelet: %v\nOutput: %s", err, output)
 	}
-	glog.V(2).Infof("'systemctl start kubelet' output:\n%s", string(output))
+	klog.V(2).Infof("'systemctl start kubelet' output:\n%s", string(output))
 
 	return nil
 }
 
 func pathFor(hostPath string) string {
 	if hostPath[0] != '/' {
-		glog.Fatalf("path was not absolute: %q", hostPath)
+		klog.Fatalf("path was not absolute: %q", hostPath)
 	}
 	return RootFS + hostPath[1:]
 }

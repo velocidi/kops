@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/iam"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
@@ -42,7 +42,7 @@ func (e *IAMInstanceProfileRole) Find(c *fi.Context) (*IAMInstanceProfileRole, e
 	cloud := c.Cloud.(awsup.AWSCloud)
 
 	if e.Role == nil || e.Role.ID == nil {
-		glog.V(2).Infof("Role/RoleID not set")
+		klog.V(2).Infof("Role/RoleID not set")
 		return nil, nil
 	}
 	roleID := *e.Role.ID
@@ -112,8 +112,8 @@ func (_ *IAMInstanceProfileRole) RenderAWS(t *awsup.AWSAPITarget, a, e, changes 
 }
 
 type terraformIAMInstanceProfile struct {
-	Name *string            `json:"name"`
-	Role *terraform.Literal `json:"role"`
+	Name *string            `json:"name" cty:"name"`
+	Role *terraform.Literal `json:"role" cty:"role"`
 }
 
 func (_ *IAMInstanceProfileRole) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *IAMInstanceProfileRole) error {

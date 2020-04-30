@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,12 +24,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/kops/cmd/kops/util"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 )
 
 const boilerPlate = `
-# Copyright 2016 The Kubernetes Authors.
+# Copyright 2019 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ var (
 
 	# Bash completion support
 	printf "source $(brew --prefix)/etc/bash_completion\n" >> $HOME/.bash_profile
-	source $HOME/.bash_profile  
+	source $HOME/.bash_profile
 	source <(kops completion bash)
 	kops completion bash > ~/.kops/completion.bash.inc
 	chmod +x $HOME/.kops/completion.bash.inc
@@ -142,6 +142,10 @@ func runCompletionBash(out io.Writer, cmd *cobra.Command) error {
 }
 
 func runCompletionZsh(out io.Writer, cmd *cobra.Command) error {
+	zsh_head := "#compdef kops\n"
+
+	out.Write([]byte(zsh_head))
+
 	zsh_initialization := `
 __kops_bash_source() {
 	alias shopt=':'
@@ -284,6 +288,7 @@ __kops_convert_bash_to_zsh() {
 BASH_COMPLETION_EOF
 }
 __kops_bash_source <(__kops_convert_bash_to_zsh)
+_complete kops 2>/dev/null
 `
 	out.Write([]byte(zsh_tail))
 	return nil

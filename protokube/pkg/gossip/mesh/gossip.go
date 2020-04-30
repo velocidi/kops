@@ -19,13 +19,20 @@ package mesh
 import (
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/weaveworks/mesh"
+	"k8s.io/klog"
 	"k8s.io/kops/protokube/pkg/gossip"
 )
+
+func init() {
+	gossip.Register("mesh", func(listen, channelName, gossipName string, gossipSecret []byte, gossipSeeds gossip.SeedProvider) (gossip.GossipState, error) {
+		return NewMeshGossiper(listen, channelName, gossipName, gossipSecret, gossipSeeds)
+	})
+}
 
 type MeshGossiper struct {
 	seeds gossip.SeedProvider
@@ -33,16 +40,29 @@ type MeshGossiper struct {
 	router *mesh.Router
 	peer   *peer
 
-	version uint64
-
-	lastSnapshot *gossip.GossipStateSnapshot
+	//version uint64
 }
 
 func NewMeshGossiper(listen string, channelName string, nodeName string, password []byte, seeds gossip.SeedProvider) (*MeshGossiper, error) {
+
+	connLimit := 0 // 0 means no limit
+	gossipDnsConnLimit := os.Getenv("GOSSIP_DNS_CONN_LIMIT")
+	if gossipDnsConnLimit != "" {
+		limit, err := strconv.Atoi(gossipDnsConnLimit)
+		if err != nil {
+			// Continue with the default value
+			klog.Warningf("cannot parse env GOSSIP_DNS_CONN_LIMIT value %q", gossipDnsConnLimit)
+		} else {
+			connLimit = limit
+		}
+	}
+
+	klog.Infof("gossip dns connection limit is:%d", connLimit)
+
 	meshConfig := mesh.Config{
 		ProtocolMinVersion: mesh.ProtocolMinVersion,
 		Password:           password,
-		ConnLimit:          64,
+		ConnLimit:          connLimit,
 		PeerDiscovery:      true,
 		//TrustedSubnets:     []*net.IPNet{},
 	}
@@ -82,11 +102,11 @@ func NewMeshGossiper(listen string, channelName string, nodeName string, passwor
 }
 
 func (g *MeshGossiper) Start() error {
-	//glog.Infof("mesh router starting (%s)", *meshListen)
+	//klog.Infof("mesh router starting (%s)", *meshListen)
 	g.router.Start()
 
 	defer func() {
-		glog.Infof("mesh router stopping")
+		klog.Infof("mesh router stopping")
 		g.router.Stop()
 	}()
 
@@ -97,16 +117,16 @@ func (g *MeshGossiper) Start() error {
 
 func (g *MeshGossiper) runSeeding() {
 	for {
-		glog.V(2).Infof("Querying for seeds")
+		klog.V(2).Infof("Querying for seeds")
 
 		seeds, err := g.seeds.GetSeeds()
 		if err != nil {
-			glog.Warningf("error getting seeds: %v", err)
+			klog.Warningf("error getting seeds: %v", err)
 			time.Sleep(1 * time.Minute)
 			continue
 		}
 
-		glog.Infof("Got seeds: %s", seeds)
+		klog.Infof("Got seeds: %s", seeds)
 		// TODO: Include ourselves?  Exclude ourselves?
 
 		removeOthers := false
@@ -114,14 +134,14 @@ func (g *MeshGossiper) runSeeding() {
 
 		if len(errors) != 0 {
 			for _, err := range errors {
-				glog.Infof("error connecting to seeds: %v", err)
+				klog.Infof("error connecting to seeds: %v", err)
 			}
 
 			time.Sleep(1 * time.Minute)
 			continue
 		}
 
-		glog.V(2).Infof("Seeding successful")
+		klog.V(2).Infof("Seeding successful")
 
 		// Reseed periodically, just in case of partitions
 		// TODO: Make it so that only one node polls, or at least statistically get close
@@ -134,6 +154,6 @@ func (g *MeshGossiper) Snapshot() *gossip.GossipStateSnapshot {
 }
 
 func (g *MeshGossiper) UpdateValues(removeKeys []string, putEntries map[string]string) error {
-	glog.V(2).Infof("UpdateValues: remove=%s, put=%s", removeKeys, putEntries)
+	klog.V(2).Infof("UpdateValues: remove=%s, put=%s", removeKeys, putEntries)
 	return g.peer.updateValues(removeKeys, putEntries)
 }

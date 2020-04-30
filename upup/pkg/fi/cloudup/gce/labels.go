@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,11 +23,13 @@ import (
 	"strings"
 )
 
-// The tag name we use to differentiate multiple logically independent clusters running in the same region
-const GceLabelNameKubernetesCluster = "k8s-io-cluster-name"
+const (
+	// The tag name we use to differentiate multiple logically independent clusters running in the same region
+	GceLabelNameKubernetesCluster = "k8s-io-cluster-name"
 
-const GceLabelNameRolePrefix = "k8s-io-role-"
-const GceLabelNameEtcdClusterPrefix = "k8s-io-etcd-"
+	GceLabelNameRolePrefix        = "k8s-io-role-"
+	GceLabelNameEtcdClusterPrefix = "k8s-io-etcd-"
+)
 
 // EncodeGCELabel encodes a string into an RFC1035 compatible value, suitable for use as GCE label key or value
 // We use a URI inspired escaping, but with - instead of %.
@@ -53,7 +55,7 @@ func DecodeGCELabel(s string) (string, error) {
 	uriForm := strings.Replace(s, "-", "%", -1)
 	v, err := url.QueryUnescape(uriForm)
 	if err != nil {
-		return "", fmt.Errorf("Cannot decode GCE label: %q", s)
+		return "", fmt.Errorf("cannot decode GCE label: %q", s)
 	}
 	return v, nil
 }

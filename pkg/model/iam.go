@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,13 +17,11 @@ limitations under the License.
 package model
 
 import (
-	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 	"text/template"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/model/iam"
 	"k8s.io/kops/upup/pkg/fi"
@@ -51,24 +49,53 @@ const RolePolicyTemplate = `{
 }`
 
 func (b *IAMModelBuilder) Build(c *fi.ModelBuilderContext) error {
-	// Collect the roles in use
-	var roles []kops.InstanceGroupRole
+	// Collect managed Instance Group roles
+	managedRoles := make(map[kops.InstanceGroupRole]bool)
+
+	// Collect Instance Profile ARNs and their associated Instance Group roles
+	sharedProfileARNsToIGRole := make(map[string]kops.InstanceGroupRole)
 	for _, ig := range b.InstanceGroups {
-		found := false
-		for _, r := range roles {
-			if r == ig.Spec.Role {
-				found = true
+		if ig.Spec.IAM != nil && ig.Spec.IAM.Profile != nil {
+			specProfile := fi.StringValue(ig.Spec.IAM.Profile)
+			if matchingRole, ok := sharedProfileARNsToIGRole[specProfile]; ok {
+				if matchingRole != ig.Spec.Role {
+					return fmt.Errorf("found IAM instance profile assigned to multiple Instance Group roles %v and %v: %v",
+						ig.Spec.Role, sharedProfileARNsToIGRole[specProfile], specProfile)
+				}
+			} else {
+				sharedProfileARNsToIGRole[specProfile] = ig.Spec.Role
 			}
-		}
-		if !found {
-			roles = append(roles, ig.Spec.Role)
+		} else {
+			managedRoles[ig.Spec.Role] = true
 		}
 	}
 
-	// Generate IAM objects etc for each role
-	for _, role := range roles {
-		name := b.IAMName(role)
+	// Generate IAM tasks for each shared role
+	for profileARN, igRole := range sharedProfileARNsToIGRole {
+		iamName, err := findCustomAuthNameFromArn(profileARN)
+		if err != nil {
+			return fmt.Errorf("unable to parse instance profile name from arn %q: %v", profileARN, err)
+		}
+		err = b.buildIAMTasks(igRole, iamName, c, true)
+		if err != nil {
+			return err
+		}
+	}
 
+	// Generate IAM tasks for each managed role
+	for igRole := range managedRoles {
+		iamName := b.IAMName(igRole)
+		err := b.buildIAMTasks(igRole, iamName, c, false)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (b *IAMModelBuilder) buildIAMTasks(igRole kops.InstanceGroupRole, iamName string, c *fi.ModelBuilderContext, shared bool) error {
+	{ // To minimize diff for easier code review
 		var iamRole *awstasks.IAMRole
 		{
 			rolePolicy, err := b.buildAWSIAMRolePolicy()
@@ -77,11 +104,11 @@ func (b *IAMModelBuilder) Build(c *fi.ModelBuilderContext) error {
 			}
 
 			iamRole = &awstasks.IAMRole{
-				Name:      s(name),
+				Name:      s(iamName),
 				Lifecycle: b.Lifecycle,
 
 				RolePolicyDocument: fi.WrapResource(rolePolicy),
-				ExportWithID:       s(strings.ToLower(string(role)) + "s"),
+				ExportWithID:       s(strings.ToLower(string(igRole)) + "s"),
 			}
 			c.AddTask(iamRole)
 
@@ -91,7 +118,7 @@ func (b *IAMModelBuilder) Build(c *fi.ModelBuilderContext) error {
 			iamPolicy := &iam.PolicyResource{
 				Builder: &iam.PolicyBuilder{
 					Cluster: b.Cluster,
-					Role:    role,
+					Role:    igRole,
 					Region:  b.Region,
 				},
 			}
@@ -104,11 +131,11 @@ func (b *IAMModelBuilder) Build(c *fi.ModelBuilderContext) error {
 			if found {
 				iamPolicy.DNSZone = dnsZoneTask.(*awstasks.DNSZone)
 			} else {
-				glog.V(2).Infof("Task %q not found; won't set route53 permissions in IAM", "DNSZone/"+b.NameForDNSZone())
+				klog.V(2).Infof("Task %q not found; won't set route53 permissions in IAM", "DNSZone/"+b.NameForDNSZone())
 			}
 
 			t := &awstasks.IAMRolePolicy{
-				Name:      s(name),
+				Name:      s(iamName),
 				Lifecycle: b.Lifecycle,
 
 				Role:           iamRole,
@@ -120,15 +147,16 @@ func (b *IAMModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		var iamInstanceProfile *awstasks.IAMInstanceProfile
 		{
 			iamInstanceProfile = &awstasks.IAMInstanceProfile{
-				Name:      s(name),
+				Name:      s(iamName),
 				Lifecycle: b.Lifecycle,
+				Shared:    fi.Bool(shared),
 			}
 			c.AddTask(iamInstanceProfile)
 		}
 
 		{
 			iamInstanceProfileRole := &awstasks.IAMInstanceProfileRole{
-				Name:      s(name),
+				Name:      s(iamName),
 				Lifecycle: b.Lifecycle,
 
 				InstanceProfile: iamInstanceProfile,
@@ -137,16 +165,37 @@ func (b *IAMModelBuilder) Build(c *fi.ModelBuilderContext) error {
 			c.AddTask(iamInstanceProfileRole)
 		}
 
+		// Create External Policy tasks
+		{
+			var externalPolicies []string
+
+			if b.Cluster.Spec.ExternalPolicies != nil {
+				p := *(b.Cluster.Spec.ExternalPolicies)
+				externalPolicies = append(externalPolicies, p[strings.ToLower(string(igRole))]...)
+			}
+
+			name := fmt.Sprintf("%s-policyoverride", strings.ToLower(string(igRole)))
+			t := &awstasks.IAMRolePolicy{
+				Name:             s(name),
+				Lifecycle:        b.Lifecycle,
+				Role:             iamRole,
+				Managed:          true,
+				ExternalPolicies: &externalPolicies,
+			}
+
+			c.AddTask(t)
+		}
+
 		// Generate additional policies if needed, and attach to existing role
 		{
 			additionalPolicy := ""
 			if b.Cluster.Spec.AdditionalPolicies != nil {
-				roleAsString := reflect.ValueOf(role).String()
 				additionalPolicies := *(b.Cluster.Spec.AdditionalPolicies)
-				additionalPolicy = additionalPolicies[strings.ToLower(roleAsString)]
+
+				additionalPolicy = additionalPolicies[strings.ToLower(string(igRole))]
 			}
 
-			additionalPolicyName := "additional." + name
+			additionalPolicyName := "additional." + iamName
 
 			t := &awstasks.IAMRolePolicy{
 				Name:      s(additionalPolicyName),
@@ -160,8 +209,11 @@ func (b *IAMModelBuilder) Build(c *fi.ModelBuilderContext) error {
 					Version: iam.PolicyDefaultVersion,
 				}
 
-				statements := make([]*iam.Statement, 0)
-				json.Unmarshal([]byte(additionalPolicy), &statements)
+				statements, err := iam.ParseStatements(additionalPolicy)
+				if err != nil {
+					return fmt.Errorf("additionalPolicy %q is invalid: %v", strings.ToLower(string(igRole)), err)
+				}
+
 				p.Statement = append(p.Statement, statements...)
 
 				policy, err := p.AsJSON()
@@ -177,7 +229,6 @@ func (b *IAMModelBuilder) Build(c *fi.ModelBuilderContext) error {
 			c.AddTask(t)
 		}
 	}
-
 	return nil
 }
 

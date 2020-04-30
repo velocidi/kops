@@ -7,11 +7,11 @@ Output shell completion code for the given shell (bash or zsh).
 
 ### Synopsis
 
-Output shell completion code for the specified shell (bash or zsh). The shell code must be evaluated to provide interactive completion of kops commands.  This can be done by sourcing it from the .bash _profile. 
+Output shell completion code for the specified shell (bash or zsh). The shell code must be evaluated to provide interactive completion of kops commands.  This can be done by sourcing it from the .bash_profile.
 
-Note: this requires the bash-completion framework, which is not installed by default on Mac. Once installed, bash completion must be evaluated.  This can be done by adding the following line to the .bash profile 
+ Note: this requires the bash-completion framework, which is not installed by default on Mac. Once installed, bash_completion must be evaluated.  This can be done by adding the following line to the .bash_profile
 
-Note for zsh users: zsh completions are only supported in versions of zsh >= 5.2
+ Note for zsh users: zsh completions are only supported in versions of zsh >= 5.2
 
 ```
 kops completion [flags]
@@ -49,15 +49,20 @@ kops completion [flags]
 ### Options inherited from parent commands
 
 ```
+      --add_dir_header                   If true, adds the file directory to the header
       --alsologtostderr                  log to standard error as well as files
-      --config string                    config file (default is $HOME/.kops.yaml)
+      --config string                    yaml config file (default is $HOME/.kops.yaml)
       --log_backtrace_at traceLocation   when logging hits line file:N, emit a stack trace (default :0)
       --log_dir string                   If non-empty, write log files in this directory
-      --logtostderr                      log to standard error instead of files (default false)
+      --log_file string                  If non-empty, use this log file
+      --log_file_max_size uint           Defines the maximum size a log file can grow to. Unit is megabytes. If the value is 0, the maximum file size is unlimited. (default 1800)
+      --logtostderr                      log to standard error instead of files (default true)
       --name string                      Name of cluster. Overrides KOPS_CLUSTER_NAME environment variable
-      --state string                     Location of state storage. Overrides KOPS_STATE_STORE environment variable
+      --skip_headers                     If true, avoid header prefixes in the log messages
+      --skip_log_headers                 If true, avoid headers when opening log files
+      --state string                     Location of state storage (kops 'config' file). Overrides KOPS_STATE_STORE environment variable
       --stderrthreshold severity         logs at or above this threshold go to stderr (default 2)
-  -v, --v Level                          log level for V logs
+  -v, --v Level                          number for the log level verbosity
       --vmodule moduleSpec               comma-separated list of pattern=N settings for file-filtered logging
 ```
 

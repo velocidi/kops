@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,9 +21,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog"
 	gceacls "k8s.io/kops/pkg/acls/gce"
 	s3acls "k8s.io/kops/pkg/acls/s3"
 	kopsclient "k8s.io/kops/pkg/client/clientset_generated/clientset"
@@ -53,18 +53,19 @@ func NewFactory(options *FactoryOptions) *Factory {
 
 const (
 	STATE_ERROR = `Please set the --state flag or export KOPS_STATE_STORE.
-A valid value follows the format s3://<bucket>.
-A s3 bucket is required to store cluster state information.`
+For example, a valid value follows the format s3://<bucket>.
+You can find the supported stores in https://kops.sigs.k8s.io/state.`
 
-	INVALID_STATE_ERROR = `Unable to read state store s3 bucket.
-Please use a valid s3 bucket uri when setting --state or KOPS_STATE_STORE env var.
-A valid value follows the format s3://<bucket>.
+	INVALID_STATE_ERROR = `Unable to read state store.
+Please use a valid state store when setting --state or KOPS_STATE_STORE env var.
+For example, a valid value follows the format s3://<bucket>.
 Trailing slash will be trimmed.`
 )
 
 func (f *Factory) Clientset() (simple.Clientset, error) {
 	if f.clientset == nil {
 		registryPath := f.options.RegistryPath
+		klog.V(2).Infof("state store %s", registryPath)
 		if registryPath == "" {
 			return nil, field.Required(field.NewPath("State Store"), STATE_ERROR)
 		}
@@ -72,19 +73,24 @@ func (f *Factory) Clientset() (simple.Clientset, error) {
 		// We recognize a `k8s` scheme; this might change in future so we won't document it yet
 		// In practice nobody is going to hit this accidentally, so I don't think we need a feature flag.
 		if strings.HasPrefix(registryPath, "k8s://") {
-			u, err := url.Parse(registryPath)
+			loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+
+			configOverrides := &clientcmd.ConfigOverrides{}
+
+			if registryPath == "k8s://" {
+			} else {
+				u, err := url.Parse(registryPath)
+				if err != nil {
+					return nil, fmt.Errorf("invalid kops server url: %q", registryPath)
+				}
+				configOverrides.CurrentContext = u.Host
+			}
+
+			kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+			config, err := kubeConfig.ClientConfig()
 			if err != nil {
-				return nil, fmt.Errorf("Invalid kops server url: %q", registryPath)
+				return nil, fmt.Errorf("error loading kubeconfig for %q", registryPath)
 			}
-
-			u.Scheme = "https"
-
-			config := &rest.Config{
-				Host: u.Scheme + "://" + u.Host,
-			}
-
-			glog.Warning("Using insecure TLS")
-			config.Insecure = true
 
 			kopsClient, err := kopsclient.NewForConfig(config)
 			if err != nil {
@@ -94,7 +100,6 @@ func (f *Factory) Clientset() (simple.Clientset, error) {
 			f.clientset = &api.RESTClientset{
 				BaseURL: &url.URL{
 					Scheme: "k8s",
-					Host:   u.Host,
 				},
 				KopsClient: kopsClient.Kops(),
 			}
@@ -112,6 +117,9 @@ func (f *Factory) Clientset() (simple.Clientset, error) {
 			allowVFSList := true
 
 			f.clientset = vfsclientset.NewVFSClientset(basePath, allowVFSList)
+		}
+		if strings.HasPrefix(registryPath, "file://") {
+			klog.Warning("The local filesystem state store is not functional for running clusters")
 		}
 	}
 

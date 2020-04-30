@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,10 +21,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog"
 	"k8s.io/kops/nodeup/pkg/distros"
 	"k8s.io/kops/pkg/systemd"
 	"k8s.io/kops/upup/pkg/fi"
@@ -36,7 +35,7 @@ import (
 type Installation struct {
 	FSRoot          string
 	CacheDir        string
-	MaxTaskDuration time.Duration
+	RunTasksOptions fi.RunTasksOptions
 	Command         []string
 }
 
@@ -59,14 +58,14 @@ func (i *Installation) Run() error {
 	// If there is a package task, we need an update packages task
 	for _, t := range tasks {
 		if _, ok := t.(*nodetasks.Package); ok {
-			glog.Infof("Package task found; adding UpdatePackages task")
+			klog.Infof("Package task found; adding UpdatePackages task")
 			tasks["UpdatePackages"] = nodetasks.NewUpdatePackages()
 			break
 		}
 	}
 
 	if tasks["UpdatePackages"] == nil {
-		glog.Infof("No package task found; won't update packages")
+		klog.Infof("No package task found; won't update packages")
 	}
 
 	var configBase vfs.Path
@@ -86,7 +85,7 @@ func (i *Installation) Run() error {
 	}
 	defer context.Close()
 
-	err = context.RunTasks(i.MaxTaskDuration)
+	err = context.RunTasks(i.RunTasksOptions)
 	if err != nil {
 		return fmt.Errorf("error running tasks: %v", err)
 	}
@@ -119,6 +118,12 @@ func (i *Installation) buildSystemdJob() *nodetasks.Service {
 		buffer.WriteString("\" ")
 	}
 
+	if os.Getenv("GOSSIP_DNS_CONN_LIMIT") != "" {
+		buffer.WriteString("\"GOSSIP_DNS_CONN_LIMIT=")
+		buffer.WriteString(os.Getenv("GOSSIP_DNS_CONN_LIMIT"))
+		buffer.WriteString("\" ")
+	}
+
 	// Pass in required credentials when using user-defined s3 endpoint
 	if os.Getenv("S3_ENDPOINT") != "" {
 		buffer.WriteString("\"S3_ENDPOINT=")
@@ -135,9 +140,43 @@ func (i *Installation) buildSystemdJob() *nodetasks.Service {
 		buffer.WriteString("\" ")
 	}
 
+	// Pass in required credentials when using user-defined swift endpoint
+	if os.Getenv("OS_AUTH_URL") != "" {
+		for _, envVar := range []string{
+			"OS_TENANT_ID", "OS_TENANT_NAME", "OS_PROJECT_ID", "OS_PROJECT_NAME",
+			"OS_PROJECT_DOMAIN_NAME", "OS_PROJECT_DOMAIN_ID",
+			"OS_DOMAIN_NAME", "OS_DOMAIN_ID",
+			"OS_USERNAME",
+			"OS_PASSWORD",
+			"OS_AUTH_URL",
+			"OS_REGION_NAME",
+		} {
+			buffer.WriteString("'")
+			buffer.WriteString(envVar)
+			buffer.WriteString("=")
+			buffer.WriteString(os.Getenv(envVar))
+			buffer.WriteString("' ")
+		}
+	}
+
 	if os.Getenv("DIGITALOCEAN_ACCESS_TOKEN") != "" {
 		buffer.WriteString("\"DIGITALOCEAN_ACCESS_TOKEN=")
 		buffer.WriteString(os.Getenv("DIGITALOCEAN_ACCESS_TOKEN"))
+		buffer.WriteString("\" ")
+	}
+
+	if os.Getenv("OSS_REGION") != "" {
+		buffer.WriteString("\"OSS_REGION=")
+		buffer.WriteString(os.Getenv("OSS_REGION"))
+		buffer.WriteString("\" ")
+	}
+
+	if os.Getenv("ALIYUN_ACCESS_KEY_ID") != "" {
+		buffer.WriteString("\"ALIYUN_ACCESS_KEY_ID=")
+		buffer.WriteString(os.Getenv("ALIYUN_ACCESS_KEY_ID"))
+		buffer.WriteString("\" ")
+		buffer.WriteString("\"ALIYUN_ACCESS_KEY_SECRET=")
+		buffer.WriteString(os.Getenv("ALIYUN_ACCESS_KEY_SECRET"))
 		buffer.WriteString("\" ")
 	}
 
@@ -152,7 +191,7 @@ func (i *Installation) buildSystemdJob() *nodetasks.Service {
 	manifest.Set("Install", "WantedBy", "multi-user.target")
 
 	manifestString := manifest.Render()
-	glog.V(8).Infof("Built service manifest %q\n%s", serviceName, manifestString)
+	klog.V(8).Infof("Built service manifest %q\n%s", serviceName, manifestString)
 
 	service := &nodetasks.Service{
 		Name:       serviceName,

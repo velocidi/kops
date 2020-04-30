@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,17 +24,20 @@ import (
 
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/util"
+	"k8s.io/kops/pkg/try"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
 )
 
-const CloudConfigFilePath = "/etc/kubernetes/cloud.config"
+const (
+	CloudConfigFilePath = "/etc/kubernetes/cloud.config"
 
-// Required for vSphere CloudProvider
-const MinimumVersionForVMUUID = "1.5.3"
+	// Required for vSphere CloudProvider
+	MinimumVersionForVMUUID = "1.5.3"
 
-// VM UUID is set by cloud-init
-const VM_UUID_FILE_PATH = "/etc/vmware/vm_uuid"
+	// VM UUID is set by cloud-init
+	VM_UUID_FILE_PATH = "/etc/vmware/vm_uuid"
+)
 
 // CloudConfigBuilder creates the cloud configuration file
 type CloudConfigBuilder struct {
@@ -73,7 +76,7 @@ func (b *CloudConfigBuilder) Build(c *fi.ModelBuilderContext) error {
 			lines = append(lines, "ElbSecurityGroup = "+*cloudConfig.ElbSecurityGroup)
 		}
 	case "vsphere":
-		vm_uuid, err := getVMUUID(b.Cluster.Spec.KubernetesVersion)
+		VMUUID, err := getVMUUID(b.Cluster.Spec.KubernetesVersion)
 		if err != nil {
 			return err
 		}
@@ -96,13 +99,69 @@ func (b *CloudConfigBuilder) Build(c *fi.ModelBuilderContext) error {
 		if cloudConfig.VSphereDatastore != nil {
 			lines = append(lines, "datastore = "+*cloudConfig.VSphereDatastore)
 		}
-		if vm_uuid != "" {
-			lines = append(lines, "vm-uuid = "+strings.Trim(vm_uuid, "\n"))
+		if VMUUID != "" {
+			lines = append(lines, "vm-uuid = "+strings.Trim(VMUUID, "\n"))
 		}
 		// Disk Config for vSphere CloudProvider
 		// We need this to support Kubernetes vSphere CloudProvider < v1.5.3
 		lines = append(lines, "[disk]")
 		lines = append(lines, "scsicontrollertype = pvscsi")
+	case "openstack":
+		osc := cloudConfig.Openstack
+		if osc == nil {
+			break
+		}
+		//Support mapping of older keystone API
+		tenantName := os.Getenv("OS_TENANT_NAME")
+		if tenantName == "" {
+			tenantName = os.Getenv("OS_PROJECT_NAME")
+		}
+		tenantID := os.Getenv("OS_TENANT_ID")
+		if tenantID == "" {
+			tenantID = os.Getenv("OS_PROJECT_ID")
+		}
+		lines = append(lines,
+			fmt.Sprintf("auth-url=\"%s\"", os.Getenv("OS_AUTH_URL")),
+			fmt.Sprintf("username=\"%s\"", os.Getenv("OS_USERNAME")),
+			fmt.Sprintf("password=\"%s\"", os.Getenv("OS_PASSWORD")),
+			fmt.Sprintf("region=\"%s\"", os.Getenv("OS_REGION_NAME")),
+			fmt.Sprintf("tenant-id=\"%s\"", tenantID),
+			fmt.Sprintf("tenant-name=\"%s\"", tenantName),
+			fmt.Sprintf("domain-name=\"%s\"", os.Getenv("OS_DOMAIN_NAME")),
+			fmt.Sprintf("domain-id=\"%s\"", os.Getenv("OS_DOMAIN_ID")),
+			"",
+		)
+
+		if lb := osc.Loadbalancer; lb != nil {
+			lines = append(lines,
+				"[LoadBalancer]",
+				fmt.Sprintf("floating-network-id=%s", fi.StringValue(lb.FloatingNetworkID)),
+				fmt.Sprintf("lb-method=%s", fi.StringValue(lb.Method)),
+				fmt.Sprintf("lb-provider=%s", fi.StringValue(lb.Provider)),
+				fmt.Sprintf("use-octavia=%t", fi.BoolValue(lb.UseOctavia)),
+				fmt.Sprintf("manage-security-groups=%t", fi.BoolValue(lb.ManageSecGroups)),
+				"",
+			)
+
+			if monitor := osc.Monitor; monitor != nil {
+				lines = append(lines,
+					"create-monitor=yes",
+					fmt.Sprintf("monitor-delay=%s", fi.StringValue(monitor.Delay)),
+					fmt.Sprintf("monitor-timeout=%s", fi.StringValue(monitor.Timeout)),
+					fmt.Sprintf("monitor-max-retries=%d", fi.IntValue(monitor.MaxRetries)),
+					"",
+				)
+			}
+		}
+
+		if bs := osc.BlockStorage; bs != nil {
+			//Block Storage Config
+			lines = append(lines,
+				"[BlockStorage]",
+				fmt.Sprintf("bs-version=%s", fi.StringValue(bs.Version)),
+				fmt.Sprintf("ignore-volume-az=%t", fi.BoolValue(bs.IgnoreAZ)),
+				"")
+		}
 	}
 
 	config := "[global]\n" + strings.Join(lines, "\n") + "\n"
@@ -133,15 +192,17 @@ func getVMUUID(kubernetesVersion string) (string, error) {
 	// VM UUID is required only for Kubernetes version greater than 1.5.3
 	if actualKubernetesVersion.GTE(*minimumVersionForUUID) {
 		file, err := os.Open(VM_UUID_FILE_PATH)
-		defer file.Close()
 		if err != nil {
 			return "", err
 		}
-		vm_uuid, err := bufio.NewReader(file).ReadString('\n')
+
+		defer try.CloseFile(file)
+
+		VMUUID, err := bufio.NewReader(file).ReadString('\n')
 		if err != nil {
 			return "", err
 		}
-		return vm_uuid, err
+		return VMUUID, err
 	}
 
 	return "", err

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,15 +24,16 @@ import (
 	"k8s.io/kops/util/pkg/vfs"
 )
 
-// Path for the user-specified cluster spec
-const PathCluster = "config"
-
-// Path for completed cluster spec in the state store
-const PathClusterCompleted = "cluster.spec"
+const (
+	// Path for the user-specified cluster spec
+	PathCluster = "config"
+	// Path for completed cluster spec in the state store
+	PathClusterCompleted = "cluster.spec"
+)
 
 func ConfigBase(c *api.Cluster) (vfs.Path, error) {
 	if c.Spec.ConfigBase == "" {
-		return nil, field.Required(field.NewPath("Spec", "ConfigBase"), "")
+		return nil, field.Required(field.NewPath("spec", "configBase"), "")
 	}
 	configBase, err := vfs.Context.BuildVfsPath(c.Spec.ConfigBase)
 	if err != nil {

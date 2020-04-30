@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ func Test_Subnet_CannotChangeSubnet(t *testing.T) {
 	if err == nil {
 		t.Errorf("validation error was expected")
 	}
-	if fmt.Sprintf("%v", err) != "Subnet.CIDR: Invalid value: \"192.168.0.0/16\": field is immutable: old=\"192.168.0.1/16\" new=\"192.168.0.0/16\"" {
+	if fmt.Sprintf("%v", err) != "Subnet.CIDR: Forbidden: field is immutable: old=\"192.168.0.1/16\" new=\"192.168.0.0/16\"" {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -101,7 +101,7 @@ func TestSubnetCreate(t *testing.T) {
 			t.Fatalf("error building context: %v", err)
 		}
 
-		if err := context.RunTasks(defaultDeadline); err != nil {
+		if err := context.RunTasks(testRunTasksOptions); err != nil {
 			t.Fatalf("unexpected error during Run: %v", err)
 		}
 
@@ -219,7 +219,7 @@ func TestSharedSubnetCreateDoesNotCreateNew(t *testing.T) {
 			t.Fatalf("error building context: %v", err)
 		}
 
-		if err := context.RunTasks(defaultDeadline); err != nil {
+		if err := context.RunTasks(testRunTasksOptions); err != nil {
 			t.Fatalf("unexpected error during Run: %v", err)
 		}
 

@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,8 +20,9 @@ import (
 	"archive/tar"
 	"fmt"
 	"path"
+	"strings"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/registry"
 	"k8s.io/kops/pkg/apis/nodeup"
@@ -50,7 +51,7 @@ type DataFile struct {
 }
 
 func (b *Builder) Build(cluster *kops.Cluster, ig *kops.InstanceGroup) (*Data, error) {
-	glog.Infof("building bundle for %q", ig.Name)
+	klog.Infof("building bundle for %q", ig.Name)
 	keyStore, err := b.Clientset.KeyStore(cluster)
 	if err != nil {
 		return nil, err
@@ -76,7 +77,7 @@ func (b *Builder) Build(cluster *kops.Cluster, ig *kops.InstanceGroup) (*Data, e
 		}
 	}
 
-	glog.Infof("fullCluster %v", fullCluster)
+	klog.Infof("fullCluster %v", fullCluster)
 
 	fullCluster.Spec.ConfigBase = "/etc/kubernetes/bootstrap"
 	fullCluster.Spec.ConfigStore = "/etc/kubernetes/bootstrap"
@@ -88,7 +89,7 @@ func (b *Builder) Build(cluster *kops.Cluster, ig *kops.InstanceGroup) (*Data, e
 	{
 		data, err := utils.YamlMarshal(fullCluster)
 		if err != nil {
-			return nil, fmt.Errorf("error marshalling configuration: %v", err)
+			return nil, fmt.Errorf("error marshaling configuration: %v", err)
 		}
 
 		file := &DataFile{}
@@ -116,7 +117,7 @@ func (b *Builder) Build(cluster *kops.Cluster, ig *kops.InstanceGroup) (*Data, e
 	if pkiFiles, err := b.buildPKIFiles(cluster, ig, keyStore); err != nil {
 		return nil, err
 	} else {
-		glog.Infof("pki files %v", pkiFiles)
+		klog.Infof("pki files %v", pkiFiles)
 		files = append(files, pkiFiles...)
 	}
 
@@ -170,12 +171,16 @@ func (b *Builder) Build(cluster *kops.Cluster, ig *kops.InstanceGroup) (*Data, e
 
 		bootstrapScript := model.BootstrapScript{}
 
-		nodeupLocation, nodeupHash, err := cloudup.NodeUpLocation(assetBuilder)
-		if err != nil {
-			return nil, err
+		{
+			asset, err := cloudup.NodeUpAsset(assetBuilder)
+			if err != nil {
+				return nil, err
+			}
+
+			bootstrapScript.NodeUpSource = strings.Join(asset.Locations, ",")
+			bootstrapScript.NodeUpSourceHash = asset.Hash.Hex()
 		}
-		bootstrapScript.NodeUpSource = nodeupLocation.String()
-		bootstrapScript.NodeUpSourceHash = nodeupHash.Hex()
+
 		bootstrapScript.NodeUpConfigBuilder = func(ig *kops.InstanceGroup) (*nodeup.Config, error) {
 			return nodeupConfig, err
 		}
@@ -198,7 +203,7 @@ func (b *Builder) Build(cluster *kops.Cluster, ig *kops.InstanceGroup) (*Data, e
 		files = append(files, file)
 	}
 
-	glog.Infof("copyManifest %v", copyManifest)
+	klog.Infof("copyManifest %v", copyManifest)
 
 	for src, dest := range copyManifest {
 		data, err := vfs.Context.ReadFile(src)

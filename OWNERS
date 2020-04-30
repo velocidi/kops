@@ -1,10 +1,17 @@
+# See the OWNERS docs at https://go.k8s.io/owners
+
 approvers:
   - justinsb
   - chrislovecnm
-  - andrewsykim
   - geojaz
   - kashifsaadat
   - gambol99
-reviewers:
   - mikesplain
+  - chrisz100
+  - rdrgmnzs
+  - granular-ryanbonham
+  - rifelpet
+  - zetaab
+reviewers:
+  - joshbranham
   - robinpercy

@@ -29,6 +29,16 @@
             "Key": "k8s.io/role/master",
             "Value": "1",
             "PropagateAtLaunch": true
+          },
+          {
+            "Key": "kops.k8s.io/instancegroup",
+            "Value": "master-us-test-1a",
+            "PropagateAtLaunch": true
+          },
+          {
+            "Key": "kubernetes.io/cluster/additionaluserdata.example.com",
+            "Value": "owned",
+            "PropagateAtLaunch": true
           }
         ],
         "MetricsCollection": [
@@ -76,6 +86,16 @@
           {
             "Key": "k8s.io/role/node",
             "Value": "1",
+            "PropagateAtLaunch": true
+          },
+          {
+            "Key": "kops.k8s.io/instancegroup",
+            "Value": "nodes",
+            "PropagateAtLaunch": true
+          },
+          {
+            "Key": "kubernetes.io/cluster/additionaluserdata.example.com",
+            "Value": "owned",
             "PropagateAtLaunch": true
           }
         ],
@@ -611,6 +631,31 @@
         ]
       }
     },
+    "AWSIAMPolicyadditionalmastersadditionaluserdataexamplecom": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": "additional.masters.additionaluserdata.example.com",
+        "Roles": [
+          {
+            "Ref": "AWSIAMRolemastersadditionaluserdataexamplecom"
+          }
+        ],
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:s3:::somebucket/someobject"
+              ]
+            }
+          ],
+          "Version": "2012-10-17"
+        }
+      }
+    },
     "AWSIAMPolicymastersadditionaluserdataexamplecom": {
       "Type": "AWS::IAM::Policy",
       "Properties": {
@@ -629,8 +674,7 @@
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": "kopsK8sEC2MasterPermsFullAccess"
+              ]
             },
             {
               "Action": [
@@ -638,16 +682,15 @@
                 "autoscaling:DescribeAutoScalingInstances",
                 "autoscaling:DescribeLaunchConfigurations",
                 "autoscaling:DescribeTags",
-                "autoscaling:GetAsgForInstance",
                 "autoscaling:SetDesiredCapacity",
                 "autoscaling:TerminateInstanceInAutoScalingGroup",
-                "autoscaling:UpdateAutoScalingGroup"
+                "autoscaling:UpdateAutoScalingGroup",
+                "ec2:DescribeLaunchTemplateVersions"
               ],
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": "kopsK8sASMasterPerms"
+              ]
             },
             {
               "Action": [
@@ -656,8 +699,7 @@
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": "kopsK8sELBMasterPermsFullAccess"
+              ]
             },
             {
               "Action": [
@@ -667,8 +709,7 @@
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": "kopsMasterCertIAMPerms"
+              ]
             },
             {
               "Action": [
@@ -679,8 +720,7 @@
               "Effect": "Allow",
               "Resource": [
                 "arn:aws:route53:::hostedzone/Z1AFAKE1ZON3YO"
-              ],
-              "Sid": "kopsK8sRoute53Change"
+              ]
             },
             {
               "Action": [
@@ -689,8 +729,7 @@
               "Effect": "Allow",
               "Resource": [
                 "arn:aws:route53:::change/*"
-              ],
-              "Sid": "kopsK8sRoute53GetChanges"
+              ]
             },
             {
               "Action": [
@@ -699,8 +738,7 @@
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": "kopsK8sRoute53ListZones"
+              ]
             },
             {
               "Action": [
@@ -709,8 +747,7 @@
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": ""
+              ]
             },
             {
               "Action": [
@@ -725,8 +762,7 @@
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": "kopsK8sECR"
+              ]
             }
           ],
           "Version": "2012-10-17"
@@ -752,8 +788,7 @@
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": "kopsK8sEC2NodePerms"
+              ]
             },
             {
               "Action": [
@@ -764,8 +799,7 @@
               "Effect": "Allow",
               "Resource": [
                 "arn:aws:route53:::hostedzone/Z1AFAKE1ZON3YO"
-              ],
-              "Sid": "kopsK8sRoute53Change"
+              ]
             },
             {
               "Action": [
@@ -774,8 +808,7 @@
               "Effect": "Allow",
               "Resource": [
                 "arn:aws:route53:::change/*"
-              ],
-              "Sid": "kopsK8sRoute53GetChanges"
+              ]
             },
             {
               "Action": [
@@ -784,8 +817,7 @@
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": "kopsK8sRoute53ListZones"
+              ]
             },
             {
               "Action": [
@@ -794,8 +826,7 @@
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": ""
+              ]
             },
             {
               "Action": [
@@ -810,8 +841,7 @@
               "Effect": "Allow",
               "Resource": [
                 "*"
-              ],
-              "Sid": "kopsK8sECR"
+              ]
             }
           ],
           "Version": "2012-10-17"

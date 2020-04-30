@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,8 +38,7 @@ func newTestInterface() (dnsprovider.Interface, error) {
 }
 
 func newFakeInterface() (dnsprovider.Interface, error) {
-	var service route53testing.Route53API
-	service = route53testing.NewRoute53APIStub()
+	service := route53testing.NewRoute53APIStub()
 	iface := New(service)
 	// Add a fake zone to test against.
 	params := &route53.CreateHostedZoneInput{
@@ -127,11 +126,6 @@ func listRrsOrFail(t *testing.T, rrsets dnsprovider.ResourceRecordSets) []dnspro
 func getExampleRrs(zone dnsprovider.Zone) dnsprovider.ResourceRecordSet {
 	rrsets, _ := zone.ResourceRecordSets()
 	return rrsets.New("www11."+zone.Name(), []string{"10.10.10.10", "169.20.20.20"}, 180, rrstype.A)
-}
-
-func getInvalidRrs(zone dnsprovider.Zone) dnsprovider.ResourceRecordSet {
-	rrsets, _ := zone.ResourceRecordSets()
-	return rrsets.New("www12."+zone.Name(), []string{"rubbish", "rubbish"}, 180, rrstype.A)
 }
 
 func addRrsetOrFail(t *testing.T, rrsets dnsprovider.ResourceRecordSets, rrset dnsprovider.ResourceRecordSet) {

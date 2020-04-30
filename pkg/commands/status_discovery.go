@@ -21,10 +21,13 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/pkg/resources/digitalocean"
 	"k8s.io/kops/upup/pkg/fi/cloudup"
+	"k8s.io/kops/upup/pkg/fi/cloudup/aliup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awstasks"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
+	"k8s.io/kops/upup/pkg/fi/cloudup/openstack"
 )
 
 // CloudDiscoveryStatusStore implements status.Store by inspecting cloud objects.
@@ -38,6 +41,10 @@ func (s *CloudDiscoveryStatusStore) GetApiIngressStatus(cluster *kops.Cluster) (
 	cloud, err := cloudup.BuildCloud(cluster)
 	if err != nil {
 		return nil, err
+	}
+
+	if aliCloud, ok := cloud.(aliup.ALICloud); ok {
+		return aliCloud.GetApiIngressStatus(cluster)
 	}
 
 	if gceCloud, ok := cloud.(gce.GCECloud); ok {
@@ -58,13 +65,21 @@ func (s *CloudDiscoveryStatusStore) GetApiIngressStatus(cluster *kops.Cluster) (
 		if lb != nil {
 			lbDnsName := aws.StringValue(lb.DNSName)
 			if lbDnsName == "" {
-				return nil, fmt.Errorf("Found ELB %q, but it did not have a DNSName", name)
+				return nil, fmt.Errorf("found ELB %q, but it did not have a DNSName", name)
 			}
 
 			ingresses = append(ingresses, kops.ApiIngressStatus{Hostname: lbDnsName})
 		}
 
 		return ingresses, nil
+	}
+
+	if osCloud, ok := cloud.(openstack.OpenstackCloud); ok {
+		return osCloud.GetApiIngressStatus(cluster)
+	}
+
+	if doCloud, ok := cloud.(*digitalocean.Cloud); ok {
+		return doCloud.GetApiIngressStatus(cluster)
 	}
 
 	return nil, fmt.Errorf("API Ingress Status not implemented for %T", cloud)
@@ -85,5 +100,12 @@ func (s *CloudDiscoveryStatusStore) FindClusterStatus(cluster *kops.Cluster) (*k
 		return awsCloud.FindClusterStatus(cluster)
 	}
 
-	return nil, fmt.Errorf("Etcd Status not implemented for %T", cloud)
+	if aliCloud, ok := cloud.(aliup.ALICloud); ok {
+		return aliCloud.FindClusterStatus(cluster)
+	}
+
+	if osCloud, ok := cloud.(openstack.OpenstackCloud); ok {
+		return osCloud.FindClusterStatus(cluster)
+	}
+	return nil, fmt.Errorf("etcd Status not implemented for %T", cloud)
 }

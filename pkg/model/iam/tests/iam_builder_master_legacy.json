@@ -2,7 +2,6 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "kopsK8sEC2MasterPermsFullAccess",
       "Effect": "Allow",
       "Action": [
         "ec2:*"
@@ -12,24 +11,22 @@
       ]
     },
     {
-      "Sid": "kopsK8sASMasterPerms",
       "Effect": "Allow",
       "Action": [
         "autoscaling:DescribeAutoScalingGroups",
         "autoscaling:DescribeAutoScalingInstances",
         "autoscaling:DescribeLaunchConfigurations",
         "autoscaling:DescribeTags",
-        "autoscaling:GetAsgForInstance",
         "autoscaling:SetDesiredCapacity",
         "autoscaling:TerminateInstanceInAutoScalingGroup",
-        "autoscaling:UpdateAutoScalingGroup"
+        "autoscaling:UpdateAutoScalingGroup",
+        "ec2:DescribeLaunchTemplateVersions"
       ],
       "Resource": [
         "*"
       ]
     },
     {
-      "Sid": "kopsK8sELBMasterPermsFullAccess",
       "Effect": "Allow",
       "Action": [
         "elasticloadbalancing:*"
@@ -39,7 +36,6 @@
       ]
     },
     {
-      "Sid": "kopsMasterCertIAMPerms",
       "Effect": "Allow",
       "Action": [
         "iam:ListServerCertificates",
@@ -50,10 +46,10 @@
       ]
     },
     {
-      "Sid": "kopsK8sS3GetListBucket",
       "Effect": "Allow",
       "Action": [
         "s3:GetBucketLocation",
+        "s3:GetEncryptionConfiguration",
         "s3:ListBucket"
       ],
       "Resource": [
@@ -61,7 +57,6 @@
       ]
     },
     {
-      "Sid": "kopsK8sS3BucketFullAccess",
       "Effect": "Allow",
       "Action": [
         "s3:*"
@@ -69,7 +64,6 @@
       "Resource": "arn:aws:s3:::kops-tests/iam-builder-test.k8s.local/*"
     },
     {
-      "Sid": "kopsK8sKMSEncryptedVolumesLegacyPerms",
       "Effect": "Allow",
       "Action": [
         "kms:ListGrants",
@@ -82,7 +76,6 @@
       ]
     },
     {
-      "Sid": "kopsK8sKMSEncryptedVolumes",
       "Effect": "Allow",
       "Action": [
         "kms:CreateGrant",
@@ -99,7 +92,6 @@
       ]
     },
     {
-      "Sid": "",
       "Effect": "Allow",
       "Action": [
         "route53:ListHostedZones"
@@ -109,7 +101,6 @@
       ]
     },
     {
-      "Sid": "kopsK8sECR",
       "Effect": "Allow",
       "Action": [
         "ecr:GetAuthorizationToken",

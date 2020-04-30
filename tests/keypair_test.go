@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -62,7 +62,8 @@ var _ fi.Target = &MockTarget{}
 func TestKeypairUpgrade(t *testing.T) {
 	lifecycle := fi.LifecycleSync
 
-	defaultDeadline := 2 * time.Second
+	runTasksOptions := fi.RunTasksOptions{}
+	runTasksOptions.MaxTaskDuration = 2 * time.Second
 
 	target := &MockTarget{}
 
@@ -119,7 +120,7 @@ func TestKeypairUpgrade(t *testing.T) {
 			t.Fatalf("error building context: %v", err)
 		}
 
-		if err := context.RunTasks(defaultDeadline); err != nil {
+		if err := context.RunTasks(runTasksOptions); err != nil {
 			t.Fatalf("unexpected error during Run: %v", err)
 		}
 	}
@@ -160,7 +161,7 @@ func TestKeypairUpgrade(t *testing.T) {
 			t.Fatalf("error building context: %v", err)
 		}
 
-		if err := context.RunTasks(defaultDeadline); err != nil {
+		if err := context.RunTasks(runTasksOptions); err != nil {
 			t.Fatalf("unexpected error during Run: %v", err)
 		}
 	}
@@ -180,7 +181,7 @@ func TestKeypairUpgrade(t *testing.T) {
 			t.Fatalf("error building context: %v", err)
 		}
 
-		if err := context.RunTasks(defaultDeadline); err != nil {
+		if err := context.RunTasks(runTasksOptions); err != nil {
 			t.Fatalf("unexpected error during Run: %v", err)
 		}
 	}

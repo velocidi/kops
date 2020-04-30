@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/blang/semver"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 func ParseKubernetesVersion(version string) (*semver.Version, error) {
@@ -72,11 +72,31 @@ func ParseKubernetesVersion(version string) (*semver.Version, error) {
 			sv = semver.Version{Major: 1, Minor: 18}
 		} else if strings.Contains(v, "/v1.19.") {
 			sv = semver.Version{Major: 1, Minor: 19}
+		} else if strings.Contains(v, "/v1.20.") {
+			sv = semver.Version{Major: 1, Minor: 20}
+		} else if strings.Contains(v, "/v1.21.") {
+			sv = semver.Version{Major: 1, Minor: 21}
+		} else if strings.Contains(v, "/v1.22.") {
+			sv = semver.Version{Major: 1, Minor: 22}
+		} else if strings.Contains(v, "/v1.23.") {
+			sv = semver.Version{Major: 1, Minor: 23}
+		} else if strings.Contains(v, "/v1.24.") {
+			sv = semver.Version{Major: 1, Minor: 24}
+		} else if strings.Contains(v, "/v1.25.") {
+			sv = semver.Version{Major: 1, Minor: 25}
+		} else if strings.Contains(v, "/v1.26.") {
+			sv = semver.Version{Major: 1, Minor: 26}
+		} else if strings.Contains(v, "/v1.27.") {
+			sv = semver.Version{Major: 1, Minor: 27}
+		} else if strings.Contains(v, "/v1.28.") {
+			sv = semver.Version{Major: 1, Minor: 28}
+		} else if strings.Contains(v, "/v1.29.") {
+			sv = semver.Version{Major: 1, Minor: 29}
 		} else {
-			glog.Errorf("unable to parse Kubernetes version %q", version)
+			klog.Errorf("unable to parse Kubernetes version %q", version)
 			return nil, fmt.Errorf("unable to parse kubernetes version %q", version)
 		}
-		glog.V(1).Infof("Kubernetes version %q string matched to %v", version, sv)
+		klog.V(1).Infof("Kubernetes version %q string matched to %v", version, sv)
 	}
 
 	return &sv, nil

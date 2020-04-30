@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/iam"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 func (m *MockIAM) GetInstanceProfile(request *iam.GetInstanceProfileInput) (*iam.GetInstanceProfileOutput, error) {
@@ -41,18 +41,16 @@ func (m *MockIAM) GetInstanceProfile(request *iam.GetInstanceProfileInput) (*iam
 }
 func (m *MockIAM) GetInstanceProfileWithContext(aws.Context, *iam.GetInstanceProfileInput, ...request.Option) (*iam.GetInstanceProfileOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockIAM) GetInstanceProfileRequest(*iam.GetInstanceProfileInput) (*request.Request, *iam.GetInstanceProfileOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockIAM) CreateInstanceProfile(request *iam.CreateInstanceProfileInput) (*iam.CreateInstanceProfileOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("CreateInstanceProfile: %v", request)
+	klog.Infof("CreateInstanceProfile: %v", request)
 
 	p := &iam.InstanceProfile{
 		InstanceProfileName: request.InstanceProfileName,
@@ -68,7 +66,7 @@ func (m *MockIAM) CreateInstanceProfile(request *iam.CreateInstanceProfileInput)
 	// // CreateDate is a required field
 	// CreateDate *time.Time `type:"timestamp" timestampFormat:"iso8601" required:"true"`
 	// // The stable and unique string identifying the instance profile. For more information
-	// 	// about IDs, see IAM Identifiers (http://docs.aws.amazon.com/IAM/latest/UserGuide/Using_Identifiers.html)
+	// 	// about IDs, see IAM Identifiers (https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html)
 	// 	// in the Using IAM guide.
 	// 	//
 	// 	// InstanceProfileId is a required field
@@ -84,17 +82,15 @@ func (m *MockIAM) CreateInstanceProfile(request *iam.CreateInstanceProfileInput)
 }
 func (m *MockIAM) CreateInstanceProfileWithContext(aws.Context, *iam.CreateInstanceProfileInput, ...request.Option) (*iam.CreateInstanceProfileOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockIAM) CreateInstanceProfileRequest(*iam.CreateInstanceProfileInput) (*request.Request, *iam.CreateInstanceProfileOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockIAM) AddRoleToInstanceProfile(request *iam.AddRoleToInstanceProfileInput) (*iam.AddRoleToInstanceProfileOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("AddRoleToInstanceProfile: %v", request)
+	klog.Infof("AddRoleToInstanceProfile: %v", request)
 
 	ip := m.InstanceProfiles[aws.StringValue(request.InstanceProfileName)]
 	if ip == nil {
@@ -112,19 +108,17 @@ func (m *MockIAM) AddRoleToInstanceProfile(request *iam.AddRoleToInstanceProfile
 
 func (m *MockIAM) AddRoleToInstanceProfileWithContext(aws.Context, *iam.AddRoleToInstanceProfileInput, ...request.Option) (*iam.AddRoleToInstanceProfileOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockIAM) AddRoleToInstanceProfileRequest(*iam.AddRoleToInstanceProfileInput) (*request.Request, *iam.AddRoleToInstanceProfileOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockIAM) RemoveRoleFromInstanceProfile(request *iam.RemoveRoleFromInstanceProfileInput) (*iam.RemoveRoleFromInstanceProfileOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("RemoveRoleFromInstanceProfile: %v", request)
+	klog.Infof("RemoveRoleFromInstanceProfile: %v", request)
 
 	ip := m.InstanceProfiles[aws.StringValue(request.InstanceProfileName)]
 	if ip == nil {
@@ -151,21 +145,19 @@ func (m *MockIAM) RemoveRoleFromInstanceProfile(request *iam.RemoveRoleFromInsta
 
 func (m *MockIAM) RemoveRoleFromInstanceProfileWithContext(aws.Context, *iam.RemoveRoleFromInstanceProfileInput, ...request.Option) (*iam.RemoveRoleFromInstanceProfileOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockIAM) RemoveRoleFromInstanceProfileRequest(*iam.RemoveRoleFromInstanceProfileInput) (*request.Request, *iam.RemoveRoleFromInstanceProfileOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockIAM) ListInstanceProfiles(request *iam.ListInstanceProfilesInput) (*iam.ListInstanceProfilesOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("ListInstanceProfiles: %v", request)
+	klog.Infof("ListInstanceProfiles: %v", request)
 
 	if request.PathPrefix != nil {
-		glog.Fatalf("MockIAM ListInstanceProfiles PathPrefix not implemented")
+		klog.Fatalf("MockIAM ListInstanceProfiles PathPrefix not implemented")
 	}
 
 	var instanceProfiles []*iam.InstanceProfile
@@ -184,12 +176,10 @@ func (m *MockIAM) ListInstanceProfiles(request *iam.ListInstanceProfilesInput) (
 
 func (m *MockIAM) ListInstanceProfilesWithContext(aws.Context, *iam.ListInstanceProfilesInput, ...request.Option) (*iam.ListInstanceProfilesOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockIAM) ListInstanceProfilesRequest(*iam.ListInstanceProfilesInput) (*request.Request, *iam.ListInstanceProfilesOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockIAM) ListInstanceProfilesPages(request *iam.ListInstanceProfilesInput, callback func(*iam.ListInstanceProfilesOutput, bool) bool) error {
@@ -206,14 +196,13 @@ func (m *MockIAM) ListInstanceProfilesPages(request *iam.ListInstanceProfilesInp
 
 func (m *MockIAM) ListInstanceProfilesPagesWithContext(aws.Context, *iam.ListInstanceProfilesInput, func(*iam.ListInstanceProfilesOutput, bool) bool, ...request.Option) error {
 	panic("Not implemented")
-	return nil
 }
 
 func (m *MockIAM) DeleteInstanceProfile(request *iam.DeleteInstanceProfileInput) (*iam.DeleteInstanceProfileOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DeleteInstanceProfile: %v", request)
+	klog.Infof("DeleteInstanceProfile: %v", request)
 
 	id := aws.StringValue(request.InstanceProfileName)
 	o := m.InstanceProfiles[id]
@@ -227,9 +216,7 @@ func (m *MockIAM) DeleteInstanceProfile(request *iam.DeleteInstanceProfileInput)
 
 func (m *MockIAM) DeleteInstanceProfileWithContext(aws.Context, *iam.DeleteInstanceProfileInput, ...request.Option) (*iam.DeleteInstanceProfileOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockIAM) DeleteInstanceProfileRequest(*iam.DeleteInstanceProfileInput) (*request.Request, *iam.DeleteInstanceProfileOutput) {
 	panic("Not implemented")
-	return nil, nil
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 type vpcInfo struct {
@@ -47,11 +47,9 @@ func (m *MockEC2) FindVpc(id string) *ec2.Vpc {
 
 func (m *MockEC2) CreateVpcRequest(*ec2.CreateVpcInput) (*request.Request, *ec2.CreateVpcOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) CreateVpcWithContext(aws.Context, *ec2.CreateVpcInput, ...request.Option) (*ec2.CreateVpcOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) CreateVpcWithId(request *ec2.CreateVpcInput, id string) (*ec2.CreateVpcOutput, error) {
 	m.mutex.Lock()
@@ -81,10 +79,10 @@ func (m *MockEC2) CreateVpcWithId(request *ec2.CreateVpcInput, id string) (*ec2.
 }
 
 func (m *MockEC2) CreateVpc(request *ec2.CreateVpcInput) (*ec2.CreateVpcOutput, error) {
-	glog.Infof("CreateVpc: %v", request)
+	klog.Infof("CreateVpc: %v", request)
 
 	if request.DryRun != nil {
-		glog.Fatalf("DryRun")
+		klog.Fatalf("DryRun")
 	}
 
 	id := m.allocateId("vpc")
@@ -94,19 +92,17 @@ func (m *MockEC2) CreateVpc(request *ec2.CreateVpcInput) (*ec2.CreateVpcOutput, 
 
 func (m *MockEC2) DescribeVpcsRequest(*ec2.DescribeVpcsInput) (*request.Request, *ec2.DescribeVpcsOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) DescribeVpcsWithContext(aws.Context, *ec2.DescribeVpcsInput, ...request.Option) (*ec2.DescribeVpcsOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) DescribeVpcs(request *ec2.DescribeVpcsInput) (*ec2.DescribeVpcsOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DescribeVpcs: %v", request)
+	klog.Infof("DescribeVpcs: %v", request)
 
 	if len(request.VpcIds) != 0 {
 		request.Filters = append(request.Filters, &ec2.Filter{Name: s("vpc-id"), Values: request.VpcIds})
@@ -153,17 +149,15 @@ func (m *MockEC2) DescribeVpcs(request *ec2.DescribeVpcsInput) (*ec2.DescribeVpc
 
 func (m *MockEC2) DescribeVpcAttributeRequest(*ec2.DescribeVpcAttributeInput) (*request.Request, *ec2.DescribeVpcAttributeOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) DescribeVpcAttributeWithContext(aws.Context, *ec2.DescribeVpcAttributeInput, ...request.Option) (*ec2.DescribeVpcAttributeOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) DescribeVpcAttribute(request *ec2.DescribeVpcAttributeInput) (*ec2.DescribeVpcAttributeOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DescribeVpcs: %v", request)
+	klog.Infof("DescribeVpcs: %v", request)
 
 	vpc := m.Vpcs[*request.VpcId]
 	if vpc == nil {
@@ -184,7 +178,7 @@ func (m *MockEC2) ModifyVpcAttribute(request *ec2.ModifyVpcAttributeInput) (*ec2
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("ModifyVpcAttribute: %v", request)
+	klog.Infof("ModifyVpcAttribute: %v", request)
 
 	vpc := m.Vpcs[*request.VpcId]
 	if vpc == nil {
@@ -205,18 +199,16 @@ func (m *MockEC2) ModifyVpcAttribute(request *ec2.ModifyVpcAttributeInput) (*ec2
 }
 func (m *MockEC2) ModifyVpcAttributeWithContext(aws.Context, *ec2.ModifyVpcAttributeInput, ...request.Option) (*ec2.ModifyVpcAttributeOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) ModifyVpcAttributeRequest(*ec2.ModifyVpcAttributeInput) (*request.Request, *ec2.ModifyVpcAttributeOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) DeleteVpc(request *ec2.DeleteVpcInput) (*ec2.DeleteVpcOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DeleteVpc: %v", request)
+	klog.Infof("DeleteVpc: %v", request)
 
 	id := aws.StringValue(request.VpcId)
 	o := m.Vpcs[id]
@@ -230,9 +222,7 @@ func (m *MockEC2) DeleteVpc(request *ec2.DeleteVpcInput) (*ec2.DeleteVpcOutput, 
 
 func (m *MockEC2) DeleteVpcWithContext(aws.Context, *ec2.DeleteVpcInput, ...request.Option) (*ec2.DeleteVpcOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) DeleteVpcRequest(*ec2.DeleteVpcInput) (*request.Request, *ec2.DeleteVpcOutput) {
 	panic("Not implemented")
-	return nil, nil
 }

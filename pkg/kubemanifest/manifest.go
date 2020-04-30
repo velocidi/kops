@@ -17,11 +17,11 @@ limitations under the License.
 package kubemanifest
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/ghodss/yaml"
-	"github.com/golang/glog"
+	"k8s.io/klog"
+	"k8s.io/kops/util/pkg/text"
 )
 
 type Manifest struct {
@@ -32,7 +32,7 @@ func LoadManifestsFrom(contents []byte) ([]*Manifest, error) {
 	var manifests []*Manifest
 
 	// TODO: Support more separators?
-	sections := bytes.Split(contents, []byte("\n---\n"))
+	sections := text.SplitContentToSections(contents)
 
 	for _, section := range sections {
 		data := make(map[string]interface{})
@@ -54,14 +54,19 @@ func LoadManifestsFrom(contents []byte) ([]*Manifest, error) {
 func (m *Manifest) ToYAML() ([]byte, error) {
 	b, err := yaml.Marshal(m.data)
 	if err != nil {
-		return nil, fmt.Errorf("error marshalling manifest to yaml: %v", err)
+		return nil, fmt.Errorf("error marshaling manifest to yaml: %v", err)
 	}
 	return b, nil
 }
 
 func (m *Manifest) accept(visitor Visitor) error {
 	err := visit(visitor, m.data, []string{}, func(v interface{}) {
-		glog.Fatalf("cannot mutate top-level data")
+		klog.Fatal("cannot mutate top-level data")
 	})
 	return err
+}
+
+// IsEmptyObject checks if the object has no keys set (i.e. `== {}`)
+func (m *Manifest) IsEmptyObject() bool {
+	return len(m.data) == 0
 }

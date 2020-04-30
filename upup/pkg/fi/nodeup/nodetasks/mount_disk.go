@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,12 +22,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/cloudinit"
 	"k8s.io/kops/upup/pkg/fi/nodeup/local"
 	"k8s.io/kops/upup/pkg/fi/utils"
-	"k8s.io/kubernetes/pkg/util/mount"
+	utilexec "k8s.io/utils/exec"
+	"k8s.io/utils/mount"
 )
 
 // MountDiskTask is responsible for mounting a device on a mountpoint
@@ -60,10 +61,7 @@ func (e *MountDiskTask) GetDependencies(tasks map[string]fi.Task) []fi.Task {
 	var deps []fi.Task
 
 	// Requires parent directories to be created
-	for _, v := range findCreatesDirParents(e.Mountpoint, tasks) {
-		deps = append(deps, v)
-	}
-
+	deps = append(deps, findCreatesDirParents(e.Mountpoint, tasks)...)
 	return deps
 }
 
@@ -133,16 +131,16 @@ func (_ *MountDiskTask) RenderLocal(t *local.LocalTarget, a, e, changes *MountDi
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("error checking for device %q: %v", e.Device, err)
 		}
-		glog.Infof("Waiting for device %q to be attached", e.Device)
+		klog.Infof("Waiting for device %q to be attached", e.Device)
 		time.Sleep(1 * time.Second)
 	}
-	glog.Infof("Found device %q", e.Device)
+	klog.Infof("Found device %q", e.Device)
 
 	// Mount the device
 	if changes.Mountpoint != "" {
-		glog.Infof("Mounting device %q on %q", e.Device, e.Mountpoint)
+		klog.Infof("Mounting device %q on %q", e.Device, e.Mountpoint)
 
-		mounter := &mount.SafeFormatAndMount{Interface: mount.New(""), Exec: mount.NewOsExec()}
+		mounter := &mount.SafeFormatAndMount{Interface: mount.New(""), Exec: utilexec.New()}
 
 		fstype := ""
 		options := []string{}

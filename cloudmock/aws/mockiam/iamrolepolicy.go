@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/iam"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 type rolePolicy struct {
@@ -57,18 +57,16 @@ func (m *MockIAM) GetRolePolicy(request *iam.GetRolePolicyInput) (*iam.GetRolePo
 }
 func (m *MockIAM) GetRolePolicyWithContext(aws.Context, *iam.GetRolePolicyInput, ...request.Option) (*iam.GetRolePolicyOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockIAM) GetRolePolicyRequest(*iam.GetRolePolicyInput) (*request.Request, *iam.GetRolePolicyOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockIAM) PutRolePolicy(request *iam.PutRolePolicyInput) (*iam.PutRolePolicyOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("PutRolePolicy: %v", request)
+	klog.Infof("PutRolePolicy: %v", request)
 
 	for _, rp := range m.RolePolicies {
 		if rp.PolicyName != aws.StringValue(request.PolicyName) {
@@ -94,18 +92,16 @@ func (m *MockIAM) PutRolePolicy(request *iam.PutRolePolicyInput) (*iam.PutRolePo
 }
 func (m *MockIAM) PutRolePolicyWithContext(aws.Context, *iam.PutRolePolicyInput, ...request.Option) (*iam.PutRolePolicyOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockIAM) PutRolePolicyRequest(*iam.PutRolePolicyInput) (*request.Request, *iam.PutRolePolicyOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockIAM) ListRolePolicies(request *iam.ListRolePoliciesInput) (*iam.ListRolePoliciesOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("ListRolePolicies: %v", request)
+	klog.Infof("ListRolePolicies: %v", request)
 
 	var policyNames []string
 
@@ -127,12 +123,10 @@ func (m *MockIAM) ListRolePolicies(request *iam.ListRolePoliciesInput) (*iam.Lis
 
 func (m *MockIAM) ListRolePoliciesWithContext(aws.Context, *iam.ListRolePoliciesInput, ...request.Option) (*iam.ListRolePoliciesOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockIAM) ListRolePoliciesRequest(*iam.ListRolePoliciesInput) (*request.Request, *iam.ListRolePoliciesOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockIAM) ListRolePoliciesPages(request *iam.ListRolePoliciesInput, callback func(*iam.ListRolePoliciesOutput, bool) bool) error {
@@ -149,14 +143,13 @@ func (m *MockIAM) ListRolePoliciesPages(request *iam.ListRolePoliciesInput, call
 
 func (m *MockIAM) ListRolePoliciesPagesWithContext(aws.Context, *iam.ListRolePoliciesInput, func(*iam.ListRolePoliciesOutput, bool) bool, ...request.Option) error {
 	panic("Not implemented")
-	return nil
 }
 
 func (m *MockIAM) DeleteRolePolicy(request *iam.DeleteRolePolicyInput) (*iam.DeleteRolePolicyOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DeleteRolePolicy: %v", request)
+	klog.Infof("DeleteRolePolicy: %v", request)
 
 	found := false
 	var newRolePolicies []*rolePolicy
@@ -177,9 +170,7 @@ func (m *MockIAM) DeleteRolePolicy(request *iam.DeleteRolePolicyInput) (*iam.Del
 
 func (m *MockIAM) DeleteRolePolicyWithContext(aws.Context, *iam.DeleteRolePolicyInput, ...request.Option) (*iam.DeleteRolePolicyOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockIAM) DeleteRolePolicyRequest(*iam.DeleteRolePolicyInput) (*request.Request, *iam.DeleteRolePolicyOutput) {
 	panic("Not implemented")
-	return nil, nil
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package protokube
 
 import (
+	k8sdns "k8s.io/kops/dns-controller/pkg/dns"
 	"k8s.io/kops/protokube/pkg/gossip/dns"
 )
 
@@ -32,10 +33,20 @@ func (p *GossipDnsProvider) Replace(fqdn string, values []string) error {
 		Name:    fqdn,
 		RrsType: "A",
 	}
-	for _, value := range values {
-		record.Rrdatas = append(record.Rrdatas, value)
-	}
+	record.Rrdatas = append(record.Rrdatas, values...)
 	return p.DNSView.ApplyChangeset(p.Zone, nil, []*dns.DNSRecord{record})
+}
+
+func (p *GossipDnsProvider) RemoveRecordsImmediate(records []k8sdns.Record) error {
+	var removeRecords []*dns.DNSRecord
+	for _, r := range records {
+		removeRecords = append(removeRecords, &dns.DNSRecord{
+			Name:    r.FQDN,
+			RrsType: string(r.RecordType),
+		})
+	}
+
+	return p.DNSView.ApplyChangeset(p.Zone, removeRecords, nil)
 }
 
 func (p *GossipDnsProvider) Run() {

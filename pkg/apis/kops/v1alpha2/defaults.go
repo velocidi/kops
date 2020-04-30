@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ limitations under the License.
 package v1alpha2
 
 import (
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog"
 )
 
 func addDefaultingFuncs(scheme *runtime.Scheme) error {
@@ -59,7 +59,7 @@ func SetDefaults_ClusterSpec(obj *ClusterSpec) {
 			obj.API.LoadBalancer = &LoadBalancerAccessSpec{}
 
 		default:
-			glog.Infof("unknown master topology type: %q", obj.Topology.Masters)
+			klog.Infof("unknown master topology type: %q", obj.Topology.Masters)
 		}
 	}
 

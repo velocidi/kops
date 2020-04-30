@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,17 +24,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang/glog"
-	compute "google.golang.org/api/compute/v0.beta"
+	compute "google.golang.org/api/compute/v1"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/diff"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
 )
 
-// InstanceTemplateNamePrefixMaxLength is the max length for the NamePrefix of an InstanceTemplate
-//  52 = 63 - 10 - 1; 63 is the GCE limit; 10 is the length of seconds since epoch; and one for the dash
-const InstanceTemplateNamePrefixMaxLength = 63 - 10 - 1
+// terraform 0.12 with google cloud provider 3.2 will complain if the length of the name_prefix is more than 32
+const InstanceTemplateNamePrefixMaxLength = 32
 
 // InstanceTemplate represents a GCE InstanceTemplate
 //go:generate fitask -type=InstanceTemplate
@@ -55,10 +54,12 @@ type InstanceTemplate struct {
 	BootDiskSizeGB *int64
 	BootDiskType   *string
 
-	CanIPForward *bool
-	Subnet       *Subnet
+	CanIPForward  *bool
+	Subnet        *Subnet
+	AliasIPRanges map[string]string
 
-	Scopes []string
+	Scopes          []string
+	ServiceAccounts []string
 
 	Metadata    map[string]*fi.ResourceHolder
 	MachineType *string
@@ -84,7 +85,7 @@ func (e *InstanceTemplate) Find(c *fi.Context) (*InstanceTemplate, error) {
 		return nil, fmt.Errorf("error listing InstanceTemplates: %v", err)
 	}
 
-	expected, err := e.mapToGCE(cloud.Project())
+	expected, err := e.mapToGCE(cloud.Project(), cloud.Region())
 	if err != nil {
 		return nil, err
 	}
@@ -102,9 +103,7 @@ func (e *InstanceTemplate) Find(c *fi.Context) (*InstanceTemplate, error) {
 
 		p := r.Properties
 
-		for _, tag := range p.Tags.Items {
-			actual.Tags = append(actual.Tags, tag)
-		}
+		actual.Tags = append(actual.Tags, p.Tags.Items...)
 		actual.MachineType = fi.String(lastComponent(p.MachineType))
 		actual.CanIPForward = &p.CanIpForward
 
@@ -122,6 +121,17 @@ func (e *InstanceTemplate) Find(c *fi.Context) (*InstanceTemplate, error) {
 		if len(p.NetworkInterfaces) != 0 {
 			ni := p.NetworkInterfaces[0]
 			actual.Network = &Network{Name: fi.String(lastComponent(ni.Network))}
+
+			if len(ni.AliasIpRanges) != 0 {
+				actual.AliasIPRanges = make(map[string]string)
+				for _, aliasIPRange := range ni.AliasIpRanges {
+					actual.AliasIPRanges[aliasIPRange.SubnetworkRangeName] = aliasIPRange.IpCidrRange
+				}
+			}
+
+			if ni.Subnetwork != "" {
+				actual.Subnet = &Subnet{Name: fi.String(lastComponent(ni.Subnetwork))}
+			}
 		}
 
 		for _, serviceAccount := range p.ServiceAccounts {
@@ -192,7 +202,7 @@ func (_ *InstanceTemplate) CheckChanges(a, e, changes *InstanceTemplate) error {
 	return nil
 }
 
-func (e *InstanceTemplate) mapToGCE(project string) (*compute.InstanceTemplate, error) {
+func (e *InstanceTemplate) mapToGCE(project string, region string) (*compute.InstanceTemplate, error) {
 	// TODO: This is similar to Instance...
 	var scheduling *compute.Scheduling
 
@@ -211,7 +221,7 @@ func (e *InstanceTemplate) mapToGCE(project string) (*compute.InstanceTemplate, 
 		}
 	}
 
-	glog.Infof("We should be using NVME for GCE")
+	klog.Infof("We should be using NVME for GCE")
 
 	var disks []*compute.AttachedDisk
 	disks = append(disks, &compute.AttachedDisk{
@@ -242,28 +252,50 @@ func (e *InstanceTemplate) mapToGCE(project string) (*compute.InstanceTemplate, 
 		AccessConfigs: []*compute.AccessConfig{{
 			Kind: "compute#accessConfig",
 			//NatIP: *e.IPAddress.Address,
-			Type: "ONE_TO_ONE_NAT",
+			Type:        "ONE_TO_ONE_NAT",
+			NetworkTier: "PREMIUM",
 		}},
 		Network: e.Network.URL(project),
 	}
 	if e.Subnet != nil {
-		ni.Subnetwork = *e.Subnet.Name
+		ni.Subnetwork = e.Subnet.URL(project, region)
+	}
+	if e.AliasIPRanges != nil {
+		for k, v := range e.AliasIPRanges {
+			ni.AliasIpRanges = append(ni.AliasIpRanges, &compute.AliasIpRange{
+				SubnetworkRangeName: k,
+				IpCidrRange:         v,
+			})
+		}
 	}
 	networkInterfaces = append(networkInterfaces, ni)
 
-	var serviceAccounts []*compute.ServiceAccount
+	scopes := make([]string, 0)
 	if e.Scopes != nil {
-		var scopes []string
 		for _, s := range e.Scopes {
 			s = scopeToLongForm(s)
-
 			scopes = append(scopes, s)
 		}
-		serviceAccounts = append(serviceAccounts, &compute.ServiceAccount{
-			Email:  "default",
-			Scopes: scopes,
-		})
 	}
+	serviceAccounts := []*compute.ServiceAccount{
+		{
+			Email:  e.ServiceAccounts[0],
+			Scopes: scopes,
+		},
+	}
+	// if e.ServiceAccounts != nil {
+	// 	for _, s := range e.ServiceAccounts {
+	// 		serviceAccounts = append(serviceAccounts, &compute.ServiceAccount{
+	// 			Email:  s,
+	// 			Scopes: scopes,
+	// 		})
+	// 	}
+	// } else {
+	// 	serviceAccounts = append(serviceAccounts, &compute.ServiceAccount{
+	// 		Email:  "default",
+	// 		Scopes: scopes,
+	// 	})
+	// }
 
 	var metadataItems []*compute.MetadataItems
 	for key, r := range e.Metadata {
@@ -334,11 +366,11 @@ func matches(l, r *compute.InstanceTemplate) bool {
 	normalizedR := normalize(r)
 
 	if !reflect.DeepEqual(normalizedL, normalizedR) {
-		if glog.V(10) {
+		if klog.V(10) {
 			ls := fi.DebugAsJsonStringIndent(normalizedL)
 			rs := fi.DebugAsJsonStringIndent(normalizedR)
-			glog.V(10).Infof("Not equal")
-			glog.V(10).Infof(diff.FormatDiff(ls, rs))
+			klog.V(10).Infof("Not equal")
+			klog.V(10).Infof(diff.FormatDiff(ls, rs))
 		}
 		return false
 	}
@@ -355,14 +387,15 @@ func (e *InstanceTemplate) URL(project string) (string, error) {
 
 func (_ *InstanceTemplate) RenderGCE(t *gce.GCEAPITarget, a, e, changes *InstanceTemplate) error {
 	project := t.Cloud.Project()
+	region := t.Cloud.Region()
 
-	i, err := e.mapToGCE(project)
+	i, err := e.mapToGCE(project, region)
 	if err != nil {
 		return err
 	}
 
 	if a == nil {
-		glog.V(4).Infof("Creating InstanceTemplate %v", i)
+		klog.V(4).Infof("Creating InstanceTemplate %v", i)
 
 		name := fi.StringValue(e.NamePrefix) + "-" + strconv.FormatInt(time.Now().Unix(), 10)
 		e.ID = &name
@@ -384,74 +417,58 @@ func (_ *InstanceTemplate) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Instanc
 }
 
 type terraformInstanceTemplate struct {
-	terraformInstanceCommon
-	NamePrefix string `json:"name_prefix"`
-}
-
-type terraformInstanceCommon struct {
-	CanIPForward          bool                          `json:"can_ip_forward"`
-	MachineType           string                        `json:"machine_type,omitempty"`
-	ServiceAccount        *terraformServiceAccount      `json:"service_account,omitempty"`
-	Scheduling            *terraformScheduling          `json:"scheduling,omitempty"`
-	Disks                 []*terraformAttachedDisk      `json:"disk,omitempty"`
-	NetworkInterfaces     []*terraformNetworkInterface  `json:"network_interface,omitempty"`
-	Metadata              map[string]*terraform.Literal `json:"metadata,omitempty"`
-	MetadataStartupScript *terraform.Literal            `json:"metadata_startup_script,omitempty"`
-	Tags                  []string                      `json:"tags,omitempty"`
-
-	// Only for instances:
-	Zone string `json:"zone,omitempty"`
+	NamePrefix            string                                   `json:"name_prefix" cty:"name_prefix"`
+	CanIPForward          bool                                     `json:"can_ip_forward" cty:"can_ip_forward"`
+	MachineType           string                                   `json:"machine_type,omitempty" cty:"machine_type"`
+	ServiceAccount        *terraformServiceAccount                 `json:"service_account,omitempty" cty:"service_account"`
+	Scheduling            *terraformScheduling                     `json:"scheduling,omitempty" cty:"scheduling"`
+	Disks                 []*terraformInstanceTemplateAttachedDisk `json:"disk,omitempty" cty:"disk"`
+	NetworkInterfaces     []*terraformNetworkInterface             `json:"network_interface,omitempty" cty:"network_interface"`
+	Metadata              map[string]*terraform.Literal            `json:"metadata,omitempty" cty:"metadata"`
+	MetadataStartupScript *terraform.Literal                       `json:"metadata_startup_script,omitempty" cty:"metadata_startup_script"`
+	Tags                  []string                                 `json:"tags,omitempty" cty:"tags"`
 }
 
 type terraformServiceAccount struct {
-	Scopes []string `json:"scopes"`
+	Email  string   `json:"email" cty:"email"`
+	Scopes []string `json:"scopes" cty:"scopes"`
 }
 
 type terraformScheduling struct {
-	AutomaticRestart  bool   `json:"automatic_restart"`
-	OnHostMaintenance string `json:"on_host_maintenance,omitempty"`
-	Preemptible       bool   `json:"preemptible"`
+	AutomaticRestart  bool   `json:"automatic_restart" cty:"automatic_restart"`
+	OnHostMaintenance string `json:"on_host_maintenance,omitempty" cty:"on_host_maintenance"`
+	Preemptible       bool   `json:"preemptible" cty:"preemptible"`
 }
 
-type terraformAttachedDisk struct {
-	// These values are common
-	AutoDelete bool   `json:"auto_delete,omitempty"`
-	DeviceName string `json:"device_name,omitempty"`
+type terraformInstanceTemplateAttachedDisk struct {
+	AutoDelete bool   `json:"auto_delete,omitempty" cty:"auto_delete"`
+	DeviceName string `json:"device_name,omitempty" cty:"device_name"`
 
-	// DANGER - common but different meaning:
-	//   for an instance template this is scratch vs persistent
-	//   for an instance this is 'pd-standard', 'pd-ssd', 'local-ssd' etc
-	Type string `json:"type,omitempty"`
-
-	// These values are only for instance templates:
-	Boot        bool   `json:"boot,omitempty"`
-	DiskName    string `json:"disk_name,omitempty"`
-	SourceImage string `json:"source_image,omitempty"`
-	Source      string `json:"source,omitempty"`
-	Interface   string `json:"interface,omitempty"`
-	Mode        string `json:"mode,omitempty"`
-	DiskType    string `json:"disk_type,omitempty"`
-	DiskSizeGB  int64  `json:"disk_size_gb,omitempty"`
-
-	// These values are only for instances:
-	Disk    string `json:"disk,omitempty"`
-	Image   string `json:"image,omitempty"`
-	Scratch bool   `json:"scratch,omitempty"`
-	Size    int64  `json:"size,omitempty"`
+	// scratch vs persistent
+	Type        string `json:"type,omitempty" cty:"type"`
+	Boot        bool   `json:"boot,omitempty" cty:"boot"`
+	DiskName    string `json:"disk_name,omitempty" cty:"disk_name"`
+	SourceImage string `json:"source_image,omitempty" cty:"source_image"`
+	Source      string `json:"source,omitempty" cty:"source"`
+	Interface   string `json:"interface,omitempty" cty:"interface"`
+	Mode        string `json:"mode,omitempty" cty:"mode"`
+	DiskType    string `json:"disk_type,omitempty" cty:"disk_type"`
+	DiskSizeGB  int64  `json:"disk_size_gb,omitempty" cty:"disk_size_gb"`
 }
 
 type terraformNetworkInterface struct {
-	Network      *terraform.Literal       `json:"network,omitempty"`
-	Subnetwork   *terraform.Literal       `json:"subnetwork,omitempty"`
-	AccessConfig []*terraformAccessConfig `json:"access_config"`
+	Network      *terraform.Literal       `json:"network,omitempty" cty:"network"`
+	Subnetwork   *terraform.Literal       `json:"subnetwork,omitempty" cty:"subnetwork"`
+	AccessConfig []*terraformAccessConfig `json:"access_config" cty:"access_config"`
 }
 
 type terraformAccessConfig struct {
-	NatIP *terraform.Literal `json:"nat_ip,omitempty"`
+	NatIP *terraform.Literal `json:"nat_ip,omitempty" cty:"nat_ip"`
 }
 
-func (t *terraformInstanceCommon) AddNetworks(network *Network, subnet *Subnet, networkInterfacs []*compute.NetworkInterface) {
-	for _, g := range networkInterfacs {
+func addNetworks(network *Network, subnet *Subnet, networkInterfaces []*compute.NetworkInterface) []*terraformNetworkInterface {
+	ni := make([]*terraformNetworkInterface, 0)
+	for _, g := range networkInterfaces {
 		tf := &terraformNetworkInterface{}
 		if network != nil {
 			tf.Network = network.TerraformName()
@@ -471,44 +488,49 @@ func (t *terraformInstanceCommon) AddNetworks(network *Network, subnet *Subnet, 
 			tf.AccessConfig = append(tf.AccessConfig, tac)
 		}
 
-		t.NetworkInterfaces = append(t.NetworkInterfaces, tf)
+		ni = append(ni, tf)
 	}
+	return ni
 }
 
-func (t *terraformInstanceCommon) AddMetadata(target *terraform.TerraformTarget, name string, metadata *compute.Metadata) error {
-	if metadata != nil {
-		if t.Metadata == nil {
-			t.Metadata = make(map[string]*terraform.Literal)
-		}
-		for _, g := range metadata.Items {
-			v := fi.NewStringResource(fi.StringValue(g.Value))
-			tfResource, err := target.AddFile("google_compute_instance_template", name, "metadata_"+g.Key, v)
-			if err != nil {
-				return err
-			}
-
-			t.Metadata[g.Key] = tfResource
-		}
+func addMetadata(target *terraform.TerraformTarget, name string, metadata *compute.Metadata) (map[string]*terraform.Literal, error) {
+	if metadata == nil {
+		return nil, nil
 	}
+	m := make(map[string]*terraform.Literal)
+	for _, g := range metadata.Items {
+		v := fi.NewStringResource(fi.StringValue(g.Value))
+		tfResource, err := target.AddFile("google_compute_instance_template", name, "metadata_"+g.Key, v)
+		if err != nil {
+			return nil, err
+		}
 
-	return nil
+		m[g.Key] = tfResource
+	}
+	return m, nil
 }
 
-func (t *terraformInstanceCommon) AddServiceAccounts(serviceAccounts []*compute.ServiceAccount) {
-	for _, g := range serviceAccounts {
-		for _, scope := range g.Scopes {
-			if t.ServiceAccount == nil {
-				t.ServiceAccount = &terraformServiceAccount{}
-			}
-			t.ServiceAccount.Scopes = append(t.ServiceAccount.Scopes, scope)
-		}
+func addServiceAccounts(serviceAccounts []*compute.ServiceAccount) *terraformServiceAccount {
+	// there's an inconsistency here- GCP only lets you have one service account per VM
+	// terraform gets it right, but the golang api doesn't. womp womp :(
+	if len(serviceAccounts) != 1 {
+		klog.Fatal("Instances can only have 1 service account assigned.")
 	}
+	klog.Infof("adding csa: %v", serviceAccounts[0].Email)
+	csa := serviceAccounts[0]
+	tsa := &terraformServiceAccount{
+		Email:  csa.Email,
+		Scopes: csa.Scopes,
+	}
+	// for _, scope := range csa.Scopes {
+	// 	tsa.Scopes = append(tsa.Scopes, scope)
+	// }
+	return tsa
 }
-
 func (_ *InstanceTemplate) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *InstanceTemplate) error {
 	project := t.Project
 
-	i, err := e.mapToGCE(project)
+	i, err := e.mapToGCE(project, t.Region)
 	if err != nil {
 		return err
 	}
@@ -524,10 +546,10 @@ func (_ *InstanceTemplate) RenderTerraform(t *terraform.TerraformTarget, a, e, c
 	//tf.Zone = i.Properties.Zone
 	tf.Tags = i.Properties.Tags.Items
 
-	tf.AddServiceAccounts(i.Properties.ServiceAccounts)
+	tf.ServiceAccount = addServiceAccounts(i.Properties.ServiceAccounts)
 
 	for _, d := range i.Properties.Disks {
-		tfd := &terraformAttachedDisk{
+		tfd := &terraformInstanceTemplateAttachedDisk{
 			AutoDelete:  d.AutoDelete,
 			Boot:        d.Boot,
 			DeviceName:  d.DeviceName,
@@ -543,9 +565,13 @@ func (_ *InstanceTemplate) RenderTerraform(t *terraform.TerraformTarget, a, e, c
 		tf.Disks = append(tf.Disks, tfd)
 	}
 
-	tf.AddNetworks(e.Network, e.Subnet, i.Properties.NetworkInterfaces)
+	tf.NetworkInterfaces = addNetworks(e.Network, e.Subnet, i.Properties.NetworkInterfaces)
 
-	tf.AddMetadata(t, name, i.Properties.Metadata)
+	metadata, err := addMetadata(t, name, i.Properties.Metadata)
+	if err != nil {
+		return err
+	}
+	tf.Metadata = metadata
 
 	if i.Properties.Scheduling != nil {
 		tf.Scheduling = &terraformScheduling{

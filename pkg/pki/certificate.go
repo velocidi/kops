@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,8 +26,9 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"os"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 type Certificate struct {
@@ -49,14 +50,14 @@ func (c *Certificate) UnmarshalJSON(b []byte) error {
 			if err2 == nil {
 				r2, err2 := ParsePEMCertificate(d)
 				if err2 == nil {
-					glog.Warningf("used base64 decode of certificate")
+					klog.Warningf("used base64 decode of certificate")
 					r = r2
 					err = nil
 				}
 			}
 
 			if err != nil {
-				glog.Infof("Invalid certificate data: %q", string(b))
+				klog.Infof("Invalid certificate data: %q", string(b))
 				return fmt.Errorf("error parsing certificate: %v", err)
 			}
 		}
@@ -100,11 +101,10 @@ func parsePEMCertificate(pemData []byte) (*x509.Certificate, error) {
 		}
 
 		if block.Type == "CERTIFICATE" {
-			glog.V(10).Infof("Parsing pem block: %q", block.Type)
+			klog.V(10).Infof("Parsing pem block: %q", block.Type)
 			return x509.ParseCertificate(block.Bytes)
-		} else {
-			glog.Infof("Ignoring unexpected PEM block: %q", block.Type)
 		}
+		klog.Infof("Ignoring unexpected PEM block: %q", block.Type)
 
 		pemData = rest
 	}
@@ -150,4 +150,16 @@ func (c *Certificate) WriteTo(w io.Writer) (int64, error) {
 		return 0, err
 	}
 	return b.WriteTo(w)
+}
+
+func (c *Certificate) WriteToFile(filename string, perm os.FileMode) error {
+	f, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	_, err = c.WriteTo(f)
+	if err1 := f.Close(); err == nil {
+		err = err1
+	}
+	return err
 }

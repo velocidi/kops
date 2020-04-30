@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,28 +24,28 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
-// Not (yet?) in aws-sdk-go
-const ResourceTypeNatGateway = "nat-gateway"
-const ResourceTypeAddress = "elastic-ip"
+const (
+	// Not (yet?) in aws-sdk-go
+	ResourceTypeNatGateway = "nat-gateway"
+	ResourceTypeAddress    = "elastic-ip"
+)
 
 func (m *MockEC2) CreateTagsRequest(*ec2.CreateTagsInput) (*request.Request, *ec2.CreateTagsOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) CreateTagsWithContext(aws.Context, *ec2.CreateTagsInput, ...request.Option) (*ec2.CreateTagsOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) CreateTags(request *ec2.CreateTagsInput) (*ec2.CreateTagsOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("CreateTags %v", request)
+	klog.Infof("CreateTags %v", request)
 
 	for _, v := range request.Resources {
 		resourceId := *v
@@ -78,7 +78,7 @@ func (m *MockEC2) addTag(resourceId string, tag *ec2.Tag) {
 	} else if strings.HasPrefix(resourceId, "eipalloc-") {
 		resourceType = ResourceTypeAddress
 	} else {
-		glog.Fatalf("Unknown resource-type in create tags: %v", resourceId)
+		klog.Fatalf("Unknown resource-type in create tags: %v", resourceId)
 	}
 
 	t := &ec2.TagDescription{
@@ -92,12 +92,10 @@ func (m *MockEC2) addTag(resourceId string, tag *ec2.Tag) {
 
 func (m *MockEC2) DescribeTagsRequest(*ec2.DescribeTagsInput) (*request.Request, *ec2.DescribeTagsOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) DescribeTagsWithContext(aws.Context, *ec2.DescribeTagsInput, ...request.Option) (*ec2.DescribeTagsOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) hasTag(resourceType string, resourceId string, filter *ec2.Filter) bool {
@@ -137,7 +135,7 @@ func (m *MockEC2) hasTag(resourceType string, resourceId string, filter *ec2.Fil
 			}
 		}
 	} else {
-		glog.Fatalf("Unsupported filter: %v", filter)
+		klog.Fatalf("Unsupported filter: %v", filter)
 	}
 	return false
 }
@@ -165,7 +163,7 @@ func (m *MockEC2) DescribeTags(request *ec2.DescribeTagsInput) (*ec2.DescribeTag
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DescribeTags %v", request)
+	klog.Infof("DescribeTags %v", request)
 
 	var tags []*ec2.TagDescription
 
@@ -214,11 +212,9 @@ func (m *MockEC2) DescribeTags(request *ec2.DescribeTagsInput) (*ec2.DescribeTag
 }
 func (m *MockEC2) DescribeTagsPages(*ec2.DescribeTagsInput, func(*ec2.DescribeTagsOutput, bool) bool) error {
 	panic("Not implemented")
-	return nil
 }
 func (m *MockEC2) DescribeTagsPagesWithContext(aws.Context, *ec2.DescribeTagsInput, func(*ec2.DescribeTagsOutput, bool) bool, ...request.Option) error {
 	panic("Not implemented")
-	return nil
 }
 
 // SortTags sorts the slice of tags by Key

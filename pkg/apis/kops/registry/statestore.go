@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ func ReadConfigDeprecated(configPath vfs.Path, config interface{}) error {
 func WriteConfigDeprecated(cluster *kops.Cluster, configPath vfs.Path, config interface{}, writeOptions ...vfs.WriteOption) error {
 	data, err := utils.YamlMarshal(config)
 	if err != nil {
-		return fmt.Errorf("error marshalling configuration: %v", err)
+		return fmt.Errorf("error marshaling configuration: %v", err)
 	}
 
 	create := false

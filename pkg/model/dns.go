@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ func (b *DNSModelBuilder) ensureDNSZone(c *fi.ModelBuilderContext) error {
 			dnsZone.PrivateVPC = b.LinkToVPC()
 
 		default:
-			return fmt.Errorf("Unknown DNS type %q", topology.DNS.Type)
+			return fmt.Errorf("unknown DNS type %q", topology.DNS.Type)
 		}
 	}
 
@@ -92,8 +92,8 @@ func (b *DNSModelBuilder) Build(c *fi.ModelBuilderContext) error {
 	}
 
 	if b.UseLoadBalancerForAPI() {
-		// This will point our DNS to the load balancer, and put the pieces
-		// together for kubectl to be work
+		// This will point our external DNS record to the load balancer, and put the
+		// pieces together for kubectl to work
 
 		if !dns.IsGossipHostname(b.Cluster.Name) {
 			if err := b.ensureDNSZone(c); err != nil {
@@ -108,6 +108,27 @@ func (b *DNSModelBuilder) Build(c *fi.ModelBuilderContext) error {
 				TargetLoadBalancer: b.LinkToELB("api"),
 			}
 			c.AddTask(apiDnsName)
+		}
+	}
+
+	if b.UseLoadBalancerForInternalAPI() {
+		// This will point the internal API DNS record to the load balancer.
+		// This means kubelet connections go via the load balancer and are more HA.
+
+		if !dns.IsGossipHostname(b.Cluster.Name) {
+			if err := b.ensureDNSZone(c); err != nil {
+				return err
+			}
+
+			internalApiDnsName := &awstasks.DNSName{
+				Name:               s(b.Cluster.Spec.MasterInternalName),
+				Lifecycle:          b.Lifecycle,
+				Zone:               b.LinkToDNSZone(),
+				ResourceType:       s("A"),
+				TargetLoadBalancer: b.LinkToELB("api"),
+			}
+			// Using EnsureTask as MasterInternalName and MasterPublicName could be the same
+			c.EnsureTask(internalApiDnsName)
 		}
 	}
 

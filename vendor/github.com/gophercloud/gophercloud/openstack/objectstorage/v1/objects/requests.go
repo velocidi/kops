@@ -7,11 +7,13 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"strings"
 	"time"
 
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack/objectstorage/v1/accounts"
+	"github.com/gophercloud/gophercloud/openstack/objectstorage/v1/containers"
 	"github.com/gophercloud/gophercloud/pagination"
 )
 
@@ -85,6 +87,7 @@ type DownloadOpts struct {
 	IfModifiedSince   time.Time `h:"If-Modified-Since"`
 	IfNoneMatch       string    `h:"If-None-Match"`
 	IfUnmodifiedSince time.Time `h:"If-Unmodified-Since"`
+	Newest            bool      `h:"X-Newest"`
 	Range             string    `h:"Range"`
 	Expires           string    `q:"expires"`
 	MultipartManifest string    `q:"multipart-manifest"`
@@ -125,7 +128,7 @@ func Download(c *gophercloud.ServiceClient, containerName, objectName string, op
 
 	resp, err := c.Get(url, nil, &gophercloud.RequestOpts{
 		MoreHeaders: h,
-		OkCodes:     []int{200, 304},
+		OkCodes:     []int{200, 206, 304},
 	})
 	if resp != nil {
 		r.Header = resp.Header
@@ -145,6 +148,7 @@ type CreateOptsBuilder interface {
 type CreateOpts struct {
 	Content            io.Reader
 	Metadata           map[string]string
+	NoETag             bool
 	CacheControl       string `h:"Cache-Control"`
 	ContentDisposition string `h:"Content-Disposition"`
 	ContentEncoding    string `h:"Content-Encoding"`
@@ -179,16 +183,37 @@ func (opts CreateOpts) ToObjectCreateParams() (io.Reader, map[string]string, str
 		h["X-Object-Meta-"+k] = v
 	}
 
+	if opts.NoETag {
+		delete(h, "etag")
+		return opts.Content, h, q.String(), nil
+	}
+
+	if h["ETag"] != "" {
+		return opts.Content, h, q.String(), nil
+	}
+
+	// When we're dealing with big files an io.ReadSeeker allows us to efficiently calculate
+	// the md5 sum. An io.Reader is only readable once which means we have to copy the entire
+	// file content into memory first.
+	readSeeker, isReadSeeker := opts.Content.(io.ReadSeeker)
+	if !isReadSeeker {
+		data, err := ioutil.ReadAll(opts.Content)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		readSeeker = bytes.NewReader(data)
+	}
+
 	hash := md5.New()
-	buf := bytes.NewBuffer([]byte{})
-	_, err = io.Copy(io.MultiWriter(hash, buf), opts.Content)
-	if err != nil {
+	// io.Copy into md5 is very efficient as it's done in small chunks.
+	if _, err := io.Copy(hash, readSeeker); err != nil {
 		return nil, nil, "", err
 	}
-	localChecksum := fmt.Sprintf("%x", hash.Sum(nil))
-	h["ETag"] = localChecksum
+	readSeeker.Seek(0, io.SeekStart)
 
-	return buf, h, q.String(), nil
+	h["ETag"] = fmt.Sprintf("%x", hash.Sum(nil))
+
+	return readSeeker, h, q.String(), nil
 }
 
 // Create is a function that creates a new object or replaces an existing
@@ -315,20 +340,28 @@ func Delete(c *gophercloud.ServiceClient, containerName, objectName string, opts
 // GetOptsBuilder allows extensions to add additional parameters to the
 // Get request.
 type GetOptsBuilder interface {
-	ToObjectGetQuery() (string, error)
+	ToObjectGetParams() (map[string]string, string, error)
 }
 
 // GetOpts is a structure that holds parameters for getting an object's
 // metadata.
 type GetOpts struct {
+	Newest    bool   `h:"X-Newest"`
 	Expires   string `q:"expires"`
 	Signature string `q:"signature"`
 }
 
-// ToObjectGetQuery formats a GetOpts into a query string.
-func (opts GetOpts) ToObjectGetQuery() (string, error) {
+// ToObjectGetParams formats a GetOpts into a query string and a map of headers.
+func (opts GetOpts) ToObjectGetParams() (map[string]string, string, error) {
 	q, err := gophercloud.BuildQueryString(opts)
-	return q.String(), err
+	if err != nil {
+		return nil, "", err
+	}
+	h, err := gophercloud.BuildHeaders(opts)
+	if err != nil {
+		return nil, q.String(), err
+	}
+	return h, q.String(), nil
 }
 
 // Get is a function that retrieves the metadata of an object. To extract just
@@ -336,16 +369,22 @@ func (opts GetOpts) ToObjectGetQuery() (string, error) {
 // function.
 func Get(c *gophercloud.ServiceClient, containerName, objectName string, opts GetOptsBuilder) (r GetResult) {
 	url := getURL(c, containerName, objectName)
+	h := make(map[string]string)
 	if opts != nil {
-		query, err := opts.ToObjectGetQuery()
+		headers, query, err := opts.ToObjectGetParams()
 		if err != nil {
 			r.Err = err
 			return
 		}
+		for k, v := range headers {
+			h[k] = v
+		}
 		url += query
 	}
-	resp, err := c.Request("HEAD", url, &gophercloud.RequestOpts{
-		OkCodes: []int{200, 204},
+
+	resp, err := c.Head(url, &gophercloud.RequestOpts{
+		MoreHeaders: h,
+		OkCodes:     []int{200, 204},
 	})
 	if resp != nil {
 		r.Header = resp.Header
@@ -444,11 +483,20 @@ func CreateTempURL(c *gophercloud.ServiceClient, containerName, objectName strin
 	}
 	duration := time.Duration(opts.TTL) * time.Second
 	expiry := time.Now().Add(duration).Unix()
-	getHeader, err := accounts.Get(c, nil).Extract()
+	getHeader, err := containers.Get(c, containerName, nil).Extract()
 	if err != nil {
 		return "", err
 	}
-	secretKey := []byte(getHeader.TempURLKey)
+	tempURLKey := getHeader.TempURLKey
+	if tempURLKey == "" {
+		// fallback to an account TempURL key
+		getHeader, err := accounts.Get(c, nil).Extract()
+		if err != nil {
+			return "", err
+		}
+		tempURLKey = getHeader.TempURLKey
+	}
+	secretKey := []byte(tempURLKey)
 	url := getURL(c, containerName, objectName)
 	splitPath := strings.Split(url, opts.Split)
 	baseURL, objectPath := splitPath[0], splitPath[1]

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops"
 	"k8s.io/kops/nodeup/pkg/bootstrap"
 	"k8s.io/kops/upup/models"
@@ -35,27 +35,23 @@ const (
 )
 
 func main() {
-	gitVersion := ""
+	klog.InitFlags(nil)
+
+	var flagConf, flagCacheDir, flagRootFS, gitVersion string
+	var flagRetries int
+	var dryrun, installSystemdUnit bool
+	target := "direct"
+
 	if kops.GitVersion != "" {
-		gitVersion = " (git-" + kops.GitVersion + ")"
+		gitVersion = fmt.Sprintf(" (git-%s)", kops.GitVersion)
 	}
 	fmt.Printf("nodeup version %s%s\n", kops.Version, gitVersion)
-
-	var flagConf string
 	flag.StringVar(&flagConf, "conf", "node.yaml", "configuration location")
-	var flagCacheDir string
 	flag.StringVar(&flagCacheDir, "cache", "/var/cache/nodeup", "the location for the local asset cache")
-	var flagRootFS string
 	flag.StringVar(&flagRootFS, "rootfs", "/", "the location of the machine root (for running in a container)")
-	var flagRetries int
 	flag.IntVar(&flagRetries, "retries", -1, "maximum number of retries on failure: -1 means retry forever")
-
-	dryrun := false
 	flag.BoolVar(&dryrun, "dryrun", false, "Don't create cloud resources; just show what would be done")
-	target := "direct"
 	flag.StringVar(&target, "target", target, "Target - direct, cloudinit")
-
-	installSystemdUnit := false
 	flag.BoolVar(&installSystemdUnit, "install-systemd-unit", installSystemdUnit, "If true, will install a systemd unit instead of running directly")
 
 	if dryrun {
@@ -66,7 +62,7 @@ func main() {
 	flag.Parse()
 
 	if flagConf == "" {
-		glog.Exitf("--conf is required")
+		klog.Exitf("--conf is required")
 	}
 
 	retries := flagRetries
@@ -85,30 +81,31 @@ func main() {
 				if i == 0 {
 					// We could also try to evaluate based on cwd
 					if _, err := os.Stat(procSelfExe); os.IsNotExist(err) {
-						glog.Fatalf("file %v does not exists", procSelfExe)
+						klog.Fatalf("file %v does not exist", procSelfExe)
 					}
 
 					fi, err := os.Lstat(procSelfExe)
 					if err != nil {
-						glog.Fatalf("error doing lstat on %q: %v", procSelfExe, err)
+						klog.Fatalf("error doing lstat on %q: %v", procSelfExe, err)
 					}
 					if fi.Mode()&os.ModeSymlink != os.ModeSymlink {
-						glog.Fatalf("file %v is not a symlink", procSelfExe)
+						klog.Fatalf("file %v is not a symlink", procSelfExe)
 					}
 
 					s, err = os.Readlink(procSelfExe)
 					if err != nil {
-						glog.Fatalf("error reading %v link: %v", procSelfExe, err)
+						klog.Fatalf("error reading %v link: %v", procSelfExe, err)
 					}
 				}
 				command = append(command, s)
 			}
 			i := bootstrap.Installation{
-				MaxTaskDuration: 5 * time.Minute,
-				CacheDir:        flagCacheDir,
-				Command:         command,
-				FSRoot:          flagRootFS,
+				CacheDir: flagCacheDir,
+				Command:  command,
+				FSRoot:   flagRootFS,
 			}
+			i.RunTasksOptions.InitDefaults()
+			i.RunTasksOptions.MaxTaskDuration = 5 * time.Minute
 			err = i.Run()
 			if err == nil {
 				fmt.Printf("service installed")
@@ -130,7 +127,7 @@ func main() {
 		}
 
 		if retries == 0 {
-			glog.Exitf("error running nodeup: %v", err)
+			klog.Exitf("error running nodeup: %v", err)
 			os.Exit(1)
 		}
 
@@ -138,7 +135,7 @@ func main() {
 			retries--
 		}
 
-		glog.Warningf("got error running nodeup (will retry in %s): %v", retryInterval, err)
+		klog.Warningf("got error running nodeup (will retry in %s): %v", retryInterval, err)
 		time.Sleep(retryInterval)
 	}
 }

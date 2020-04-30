@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/util/pkg/vfs"
 )
 
@@ -44,7 +44,7 @@ func Apply(manifest string) error {
 
 	defer func() {
 		if err := os.RemoveAll(tmpDir); err != nil {
-			glog.Warningf("error deleting temp dir %q: %v", tmpDir, err)
+			klog.Warningf("error deleting temp dir %q: %v", tmpDir, err)
 		}
 	}()
 
@@ -64,11 +64,11 @@ func execKubectl(args ...string) (string, error) {
 	cmd.Env = env
 
 	human := strings.Join(cmd.Args, " ")
-	glog.V(2).Infof("Running command: %s", human)
+	klog.V(2).Infof("Running command: %s", human)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		glog.Infof("error running %s", human)
-		glog.Info(string(output))
+		klog.Infof("error running %s", human)
+		klog.Info(string(output))
 		return string(output), fmt.Errorf("error running kubectl")
 	}
 

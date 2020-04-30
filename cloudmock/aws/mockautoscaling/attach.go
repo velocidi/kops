@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,14 +22,14 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 func (m *MockAutoscaling) AttachLoadBalancers(request *autoscaling.AttachLoadBalancersInput) (*autoscaling.AttachLoadBalancersOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("AttachLoadBalancers: %v", request)
+	klog.Infof("AttachLoadBalancers: %v", request)
 
 	name := *request.AutoScalingGroupName
 
@@ -43,10 +43,10 @@ func (m *MockAutoscaling) AttachLoadBalancers(request *autoscaling.AttachLoadBal
 }
 
 func (m *MockAutoscaling) AttachLoadBalancersWithContext(aws.Context, *autoscaling.AttachLoadBalancersInput, ...request.Option) (*autoscaling.AttachLoadBalancersOutput, error) {
-	glog.Fatalf("Not implemented")
+	klog.Fatalf("Not implemented")
 	return nil, nil
 }
 func (m *MockAutoscaling) AttachLoadBalancersRequest(*autoscaling.AttachLoadBalancersInput) (*request.Request, *autoscaling.AttachLoadBalancersOutput) {
-	glog.Fatalf("Not implemented")
+	klog.Fatalf("Not implemented")
 	return nil, nil
 }

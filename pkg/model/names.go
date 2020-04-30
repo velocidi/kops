@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,14 +18,17 @@ package model
 
 import (
 	"fmt"
-
-	"github.com/golang/glog"
+	"regexp"
 
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/pki"
+	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awstasks"
+
+	"k8s.io/klog"
 )
 
+// SecurityGroupName returns the security group name for the specific role
 func (b *KopsModelContext) SecurityGroupName(role kops.InstanceGroupRole) string {
 	switch role {
 	case kops.InstanceGroupRoleBastion:
@@ -35,16 +38,18 @@ func (b *KopsModelContext) SecurityGroupName(role kops.InstanceGroupRole) string
 	case kops.InstanceGroupRoleMaster:
 		return "masters." + b.ClusterName()
 	default:
-		glog.Fatalf("unknown role: %v", role)
+		klog.Fatalf("unknown role: %v", role)
 		return ""
 	}
 }
 
+// LinkToSecurityGroup creates a task link the security group to the instncegroup
 func (b *KopsModelContext) LinkToSecurityGroup(role kops.InstanceGroupRole) *awstasks.SecurityGroup {
 	name := b.SecurityGroupName(role)
 	return &awstasks.SecurityGroup{Name: &name}
 }
 
+// AutoscalingGroupName derives the autoscaling group name for us
 func (b *KopsModelContext) AutoscalingGroupName(ig *kops.InstanceGroup) string {
 	switch ig.Spec.Role {
 	case kops.InstanceGroupRoleMaster:
@@ -56,7 +61,7 @@ func (b *KopsModelContext) AutoscalingGroupName(ig *kops.InstanceGroup) string {
 		return ig.ObjectMeta.Name + "." + b.ClusterName()
 
 	default:
-		glog.Fatalf("unknown InstanceGroup Role: %v", ig.Spec.Role)
+		klog.Fatalf("unknown InstanceGroup Role: %v", ig.Spec.Role)
 		return ""
 	}
 }
@@ -75,6 +80,7 @@ func (b *KopsModelContext) LinkToELBSecurityGroup(prefix string) *awstasks.Secur
 	return &awstasks.SecurityGroup{Name: &name}
 }
 
+// ELBName returns ELB name plus cluster name
 func (b *KopsModelContext) ELBName(prefix string) string {
 	return prefix + "." + b.ClusterName()
 }
@@ -99,6 +105,7 @@ func (b *KopsModelContext) NameForDNSZone() string {
 	return name
 }
 
+// IAMName determines the name of the IAM Role and Instance Profile to use for the InstanceGroup
 func (b *KopsModelContext) IAMName(role kops.InstanceGroupRole) string {
 	switch role {
 	case kops.InstanceGroupRoleMaster:
@@ -109,23 +116,42 @@ func (b *KopsModelContext) IAMName(role kops.InstanceGroupRole) string {
 		return "nodes." + b.ClusterName()
 
 	default:
-		glog.Fatalf("unknown InstanceGroup Role: %q", role)
+		klog.Fatalf("unknown InstanceGroup Role: %q", role)
 		return ""
 	}
 }
 
-func (b *KopsModelContext) LinkToIAMInstanceProfile(ig *kops.InstanceGroup) *awstasks.IAMInstanceProfile {
+var roleNamRegExp = regexp.MustCompile(`([^/]+$)`)
+
+// findCustomAuthNameFromArn parses the name of a instance profile from the arn
+func findCustomAuthNameFromArn(arn string) (string, error) {
+	if arn == "" {
+		return "", fmt.Errorf("unable to parse role arn as it is not set")
+	}
+	rs := roleNamRegExp.FindStringSubmatch(arn)
+	if len(rs) >= 2 {
+		return rs[1], nil
+	}
+
+	return "", fmt.Errorf("unable to parse role arn %q", arn)
+}
+
+func (b *KopsModelContext) LinkToIAMInstanceProfile(ig *kops.InstanceGroup) (*awstasks.IAMInstanceProfile, error) {
+	if ig.Spec.IAM != nil && ig.Spec.IAM.Profile != nil {
+		name, err := findCustomAuthNameFromArn(fi.StringValue(ig.Spec.IAM.Profile))
+		return &awstasks.IAMInstanceProfile{Name: &name}, err
+	}
 	name := b.IAMName(ig.Spec.Role)
-	return &awstasks.IAMInstanceProfile{Name: &name}
+	return &awstasks.IAMInstanceProfile{Name: &name}, nil
 }
 
 // SSHKeyName computes a unique SSH key name, combining the cluster name and the SSH public key fingerprint.
 // If an SSH key name is provided in the cluster configuration, it will use that instead.
 func (c *KopsModelContext) SSHKeyName() (string, error) {
 	// use configured SSH key name if present
-	name := c.Cluster.Spec.SSHKeyName
-	if name != "" {
-		return name, nil
+	sshKeyName := c.Cluster.Spec.SSHKeyName
+	if sshKeyName != nil && *sshKeyName != "" {
+		return *sshKeyName, nil
 	}
 
 	fingerprint, err := pki.ComputeOpenSSHKeyFingerprint(string(c.SSHPublicKeys[0]))
@@ -133,7 +159,7 @@ func (c *KopsModelContext) SSHKeyName() (string, error) {
 		return "", err
 	}
 
-	name = "kubernetes." + c.Cluster.ObjectMeta.Name + "-" + fingerprint
+	name := "kubernetes." + c.Cluster.ObjectMeta.Name + "-" + fingerprint
 	return name, nil
 }
 

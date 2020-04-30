@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -137,6 +137,61 @@ func TestListRouteTables(t *testing.T) {
 			t.Fatalf("expected Shared: true, got: %v", rt.Shared)
 		}
 		if rt.ID == "rtb-owned" && rt.Shared {
+			t.Fatalf("expected Shared: false, got: %v", rt.Shared)
+		}
+	}
+}
+
+func TestSharedVolume(t *testing.T) {
+	cloud := awsup.BuildMockAWSCloud("us-east-1", "abc")
+	clusterName := "me.example.com"
+	ownershipTagKey := "kubernetes.io/cluster/" + clusterName
+
+	c := &mockec2.MockEC2{}
+	cloud.MockEC2 = c
+
+	sharedVolume, err := c.CreateVolume(&ec2.CreateVolumeInput{
+		TagSpecifications: []*ec2.TagSpecification{
+			{
+				Tags: []*ec2.Tag{
+					{
+						Key:   aws.String(ownershipTagKey),
+						Value: aws.String("shared"),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("error creating volume: %v", err)
+	}
+
+	ownedVolume, err := c.CreateVolume(&ec2.CreateVolumeInput{
+		TagSpecifications: []*ec2.TagSpecification{
+			{
+				Tags: []*ec2.Tag{
+					{
+						Key:   aws.String(ownershipTagKey),
+						Value: aws.String("owned"),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("error creating volume: %v", err)
+	}
+
+	resourceTrackers, err := ListVolumes(cloud, clusterName)
+	if err != nil {
+		t.Fatalf("error listing volumes: %v", err)
+	}
+	t.Log(len(resourceTrackers))
+	for _, rt := range resourceTrackers {
+		if rt.ID == *sharedVolume.VolumeId && !rt.Shared {
+			t.Fatalf("expected Shared: true, got: %v", rt.Shared)
+		}
+		if rt.ID == *ownedVolume.VolumeId && rt.Shared {
 			t.Fatalf("expected Shared: false, got: %v", rt.Shared)
 		}
 	}

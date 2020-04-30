@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,8 +21,9 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/golang/glog"
-	"k8s.io/kops/upup/pkg/fi/utils"
+	"k8s.io/klog"
+
+	"k8s.io/kops/util/pkg/reflectutils"
 )
 
 type HasDependencies interface {
@@ -52,7 +53,7 @@ func FindTaskDependencies(tasks map[string]Task) map[string][]string {
 		for _, dep := range dependencies {
 			dependencyKey, found := taskToId[dep]
 			if !found {
-				glog.Fatalf("dependency not found: %v", dep)
+				klog.Fatalf("dependency not found: %v", dep)
 			}
 			dependencyKeys = append(dependencyKeys, dependencyKey)
 		}
@@ -60,9 +61,9 @@ func FindTaskDependencies(tasks map[string]Task) map[string][]string {
 		edges[k] = dependencyKeys
 	}
 
-	glog.V(4).Infof("Dependencies:")
+	klog.V(4).Infof("Dependencies:")
 	for k, v := range edges {
-		glog.V(4).Infof("\t%s:\t%v", k, v)
+		klog.V(4).Infof("\t%s:\t%v", k, v)
 	}
 
 	return edges
@@ -76,8 +77,8 @@ func reflectForDependencies(tasks map[string]Task, task Task) []Task {
 func getDependencies(tasks map[string]Task, v reflect.Value) []Task {
 	var dependencies []Task
 
-	err := utils.ReflectRecursive(v, func(path string, f *reflect.StructField, v reflect.Value) error {
-		if utils.IsPrimitiveValue(v) {
+	err := reflectutils.ReflectRecursive(v, func(path string, f *reflect.StructField, v reflect.Value) error {
+		if reflectutils.IsPrimitiveValue(v) {
 			return nil
 		}
 
@@ -111,16 +112,16 @@ func getDependencies(tasks map[string]Task, v reflect.Value) []Task {
 			} else {
 				return fmt.Errorf("Unhandled type for %q: %T", path, v.Interface())
 			}
-			return utils.SkipReflection
+			return reflectutils.SkipReflection
 
 		default:
-			glog.Infof("Unhandled kind for %q: %T", path, v.Interface())
+			klog.Infof("Unhandled kind for %q: %T", path, v.Interface())
 			return fmt.Errorf("Unhandled kind for %q: %v", path, v.Kind())
 		}
 	})
 
 	if err != nil {
-		glog.Fatalf("unexpected error finding dependencies %v", err)
+		klog.Fatalf("unexpected error finding dependencies %v", err)
 	}
 
 	return dependencies

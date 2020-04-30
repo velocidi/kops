@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 // KubectlBuilder install kubectl
@@ -51,28 +51,26 @@ func (b *KubectlBuilder) Build(c *fi.ModelBuilderContext) error {
 			return fmt.Errorf("unable to locate asset %q", assetName)
 		}
 
-		t := &nodetasks.File{
+		c.AddTask(&nodetasks.File{
 			Path:     b.KubectlPath() + "/" + assetName,
 			Contents: asset,
 			Type:     nodetasks.FileType_File,
 			Mode:     s("0755"),
-		}
-		c.AddTask(t)
+		})
 	}
 
 	{
-		kubeconfig, err := b.buildPKIKubeconfig("kubecfg")
+		kubeconfig, err := b.BuildPKIKubeconfig("kubecfg")
 		if err != nil {
 			return err
 		}
 
-		t := &nodetasks.File{
+		c.AddTask(&nodetasks.File{
 			Path:     "/var/lib/kubectl/kubeconfig",
 			Contents: fi.NewStringResource(kubeconfig),
 			Type:     nodetasks.FileType_File,
 			Mode:     s("0400"),
-		}
-		c.AddTask(t)
+		})
 
 		adminUser, adminGroup, err := b.findKubeconfigUser()
 		if err != nil {
@@ -106,17 +104,25 @@ func (b *KubectlBuilder) Build(c *fi.ModelBuilderContext) error {
 func (b *KubectlBuilder) findKubeconfigUser() (*fi.User, *fi.Group, error) {
 	var users []string
 	switch b.Distribution {
-	case distros.DistributionJessie, distros.DistributionDebian9:
+	case distros.DistributionJessie, distros.DistributionDebian9, distros.DistributionDebian10:
 		users = []string{"admin", "root"}
+	case distros.DistributionXenial, distros.DistributionBionic, distros.DistributionFocal:
+		users = []string{"ubuntu"}
+	case distros.DistributionCentos7, distros.DistributionCentos8:
+		users = []string{"centos"}
+	case distros.DistributionAmazonLinux2, distros.DistributionRhel7, distros.DistributionRhel8:
+		users = []string{"ec2-user"}
+	case distros.DistributionCoreOS, distros.DistributionFlatcar:
+		users = []string{"core"}
 	default:
-		glog.Warningf("Unknown distro; won't write kubeconfig to homedir %s", b.Distribution)
+		klog.Warningf("Unknown distro; won't write kubeconfig to homedir %s", b.Distribution)
 		return nil, nil, nil
 	}
 
 	for _, s := range users {
 		user, err := fi.LookupUser(s)
 		if err != nil {
-			glog.Warningf("error looking up user %q: %v", s, err)
+			klog.Warningf("error looking up user %q: %v", s, err)
 			continue
 		}
 		if user == nil {
@@ -124,7 +130,7 @@ func (b *KubectlBuilder) findKubeconfigUser() (*fi.User, *fi.Group, error) {
 		}
 		group, err := fi.LookupGroupById(user.Gid)
 		if err != nil {
-			glog.Warningf("unable to find group %d for user %q", user.Gid, s)
+			klog.Warningf("unable to find group %d for user %q", user.Gid, s)
 			continue
 		}
 		if group == nil {

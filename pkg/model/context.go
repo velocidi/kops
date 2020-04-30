@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,16 +23,19 @@ import (
 	"net"
 	"strings"
 
-	"github.com/blang/semver"
-	"github.com/golang/glog"
-	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/model"
 	"k8s.io/kops/pkg/apis/kops/util"
 	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/pkg/model/components"
+	nodeidentityaws "k8s.io/kops/pkg/nodeidentity/aws"
+	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awstasks"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
+
+	"github.com/blang/semver"
+	utilnet "k8s.io/apimachinery/pkg/util/net"
+	"k8s.io/klog"
 )
 
 const (
@@ -42,16 +45,15 @@ const (
 
 var UseLegacyELBName = featureflag.New("UseLegacyELBName", featureflag.Bool(false))
 
+// KopsModelContext is the kops model
 type KopsModelContext struct {
-	Cluster *kops.Cluster
-
-	Region         string
+	Cluster        *kops.Cluster
 	InstanceGroups []*kops.InstanceGroup
-
-	SSHPublicKeys [][]byte
+	Region         string
+	SSHPublicKeys  [][]byte
 }
 
-// Will attempt to calculate a meaningful name for an ELB given a prefix
+// GetELBName32 will attempt to calculate a meaningful name for an ELB given a prefix
 // Will never return a string longer than 32 chars
 // Note this is _not_ the primary identifier for the ELB - we use the Name tag for that.
 func (m *KopsModelContext) GetELBName32(prefix string) string {
@@ -63,7 +65,7 @@ func (m *KopsModelContext) GetELBName32(prefix string) string {
 		if len(s) > 32 {
 			s = s[:32]
 		}
-		glog.Infof("UseLegacyELBName feature-flag is set; built legacy name %q", s)
+		klog.Infof("UseLegacyELBName feature-flag is set; built legacy name %q", s)
 		return s
 	}
 
@@ -78,7 +80,7 @@ func (m *KopsModelContext) GetELBName32(prefix string) string {
 	// But we always compute the hash and add it, lest we trick users into assuming that we never do this
 	h := fnv.New32a()
 	if _, err := h.Write([]byte(s)); err != nil {
-		glog.Fatalf("error hashing values: %v", err)
+		klog.Fatalf("error hashing values: %v", err)
 	}
 	hashString := base32.HexEncoding.EncodeToString(h.Sum(nil))
 	hashString = strings.ToLower(hashString)
@@ -95,6 +97,7 @@ func (m *KopsModelContext) GetELBName32(prefix string) string {
 	return s
 }
 
+// ClusterName returns the cluster name
 func (m *KopsModelContext) ClusterName() string {
 	return m.Cluster.ObjectMeta.Name
 }
@@ -102,6 +105,8 @@ func (m *KopsModelContext) ClusterName() string {
 // GatherSubnets maps the subnet names in an InstanceGroup to the ClusterSubnetSpec objects (which are stored on the Cluster)
 func (m *KopsModelContext) GatherSubnets(ig *kops.InstanceGroup) ([]*kops.ClusterSubnetSpec, error) {
 	var subnets []*kops.ClusterSubnetSpec
+	var subnetType kops.SubnetType
+
 	for _, subnetName := range ig.Spec.Subnets {
 		var matches []*kops.ClusterSubnetSpec
 		for i := range m.Cluster.Spec.Subnets {
@@ -117,7 +122,18 @@ func (m *KopsModelContext) GatherSubnets(ig *kops.InstanceGroup) ([]*kops.Cluste
 			return nil, fmt.Errorf("found multiple subnets with name: %q", subnetName)
 		}
 		subnets = append(subnets, matches[0])
+
+		// @step: check the instance is not cross subnet types
+		switch subnetType {
+		case "":
+			subnetType = matches[0].Type
+		default:
+			if matches[0].Type != subnetType {
+				return nil, fmt.Errorf("found subnets of different types: %v", strings.Join([]string{string(subnetType), string(matches[0].Type)}, ","))
+			}
+		}
 	}
+
 	return subnets, nil
 }
 
@@ -167,7 +183,7 @@ func (m *KopsModelContext) NodeInstanceGroups() []*kops.InstanceGroup {
 
 // CloudTagsForInstanceGroup computes the tags to apply to instances in the specified InstanceGroup
 func (m *KopsModelContext) CloudTagsForInstanceGroup(ig *kops.InstanceGroup) (map[string]string, error) {
-	labels := make(map[string]string)
+	labels := m.CloudTags(m.AutoscalingGroupName(ig), false)
 
 	// Apply any user-specified global labels first so they can be overridden by IG-specific labels
 	for k, v := range m.Cluster.Spec.CloudLabels {
@@ -206,6 +222,8 @@ func (m *KopsModelContext) CloudTagsForInstanceGroup(ig *kops.InstanceGroup) (ma
 		labels[awstasks.CloudTagInstanceGroupRolePrefix+strings.ToLower(string(kops.InstanceGroupRoleBastion))] = "1"
 	}
 
+	labels[nodeidentityaws.CloudTagInstanceGroupName] = ig.Name
+
 	return labels, nil
 }
 
@@ -217,7 +235,7 @@ func (m *KopsModelContext) CloudTags(name string, shared bool) map[string]string
 	case kops.CloudProviderAWS:
 		if shared {
 			// If the resource is shared, we don't try to set the Name - we presume that is managed externally
-			glog.V(4).Infof("Skipping Name tag for shared resource")
+			klog.V(4).Infof("Skipping Name tag for shared resource")
 		} else {
 			if name != "" {
 				tags["Name"] = name
@@ -226,13 +244,11 @@ func (m *KopsModelContext) CloudTags(name string, shared bool) map[string]string
 
 		// Kubernetes 1.6 introduced the shared ownership tag; that replaces TagClusterName
 		setLegacyTag := true
-		if m.IsKubernetesGTE("1.6") {
-			// For the moment, we only skip the legacy tag for shared resources
-			// (other people may be using it)
-			if shared {
-				glog.V(4).Infof("Skipping %q tag for shared resource", awsup.TagClusterName)
-				setLegacyTag = false
-			}
+		// For the moment, we only skip the legacy tag for shared resources
+		// (other people may be using it)
+		if shared {
+			klog.V(4).Infof("Skipping %q tag for shared resource", awsup.TagClusterName)
+			setLegacyTag = false
 		}
 		if setLegacyTag {
 			tags[awsup.TagClusterName] = m.Cluster.ObjectMeta.Name
@@ -242,12 +258,25 @@ func (m *KopsModelContext) CloudTags(name string, shared bool) map[string]string
 			tags["kubernetes.io/cluster/"+m.Cluster.ObjectMeta.Name] = "shared"
 		} else {
 			tags["kubernetes.io/cluster/"+m.Cluster.ObjectMeta.Name] = "owned"
+			for k, v := range m.Cluster.Spec.CloudLabels {
+				tags[k] = v
+			}
 		}
 
 	}
 	return tags
 }
 
+// UseBootstrapTokens checks if bootstrap tokens are enabled
+func (m *KopsModelContext) UseBootstrapTokens() bool {
+	if m.Cluster.Spec.KubeAPIServer == nil {
+		return false
+	}
+
+	return fi.BoolValue(m.Cluster.Spec.KubeAPIServer.EnableBootstrapAuthToken)
+}
+
+// UsesBastionDns checks if we should use a specific name for the bastion dns
 func (m *KopsModelContext) UsesBastionDns() bool {
 	if m.Cluster.Spec.Topology.Bastion != nil && m.Cluster.Spec.Topology.Bastion.BastionPublicName != "" {
 		return true
@@ -255,6 +284,7 @@ func (m *KopsModelContext) UsesBastionDns() bool {
 	return false
 }
 
+// UsesSSHBastion checks if we have a Bastion in the cluster
 func (m *KopsModelContext) UsesSSHBastion() bool {
 	for _, ig := range m.InstanceGroups {
 		if ig.Spec.Role == kops.InstanceGroupRoleBastion {
@@ -265,6 +295,7 @@ func (m *KopsModelContext) UsesSSHBastion() bool {
 	return false
 }
 
+// UseLoadBalancerForAPI checks if we are using a load balancer for the kubeapi
 func (m *KopsModelContext) UseLoadBalancerForAPI() bool {
 	if m.Cluster.Spec.API == nil {
 		return false
@@ -272,6 +303,15 @@ func (m *KopsModelContext) UseLoadBalancerForAPI() bool {
 	return m.Cluster.Spec.API.LoadBalancer != nil
 }
 
+// UseLoadBalancerForInternalAPI check if true then we will use the created loadbalancer for internal kubelet
+// connections.  The intention here is to make connections to apiserver more
+// HA - see https://github.com/kubernetes/kops/issues/4252
+func (m *KopsModelContext) UseLoadBalancerForInternalAPI() bool {
+	return m.UseLoadBalancerForAPI() &&
+		m.Cluster.Spec.API.LoadBalancer.UseForInternalApi
+}
+
+// UsePrivateDNS checks if we are using private DNS
 func (m *KopsModelContext) UsePrivateDNS() bool {
 	topology := m.Cluster.Spec.Topology
 	if topology != nil && topology.DNS != nil {
@@ -282,7 +322,7 @@ func (m *KopsModelContext) UsePrivateDNS() bool {
 			return true
 
 		default:
-			glog.Warningf("Unknown DNS type %q", topology.DNS.Type)
+			klog.Warningf("Unknown DNS type %q", topology.DNS.Type)
 			return false
 		}
 	}
@@ -290,9 +330,20 @@ func (m *KopsModelContext) UsePrivateDNS() bool {
 	return false
 }
 
-// UseEtcdTLS checks to see if etcd tls is enabled
-func (c *KopsModelContext) UseEtcdTLS() bool {
+// UseEtcdManager checks to see if etcd manager is enabled
+func (c *KopsModelContext) UseEtcdManager() bool {
 	for _, x := range c.Cluster.Spec.EtcdClusters {
+		if x.Provider == kops.EtcdProviderTypeManager {
+			return true
+		}
+	}
+
+	return false
+}
+
+// UseEtcdTLS checks to see if etcd tls is enabled
+func (m *KopsModelContext) UseEtcdTLS() bool {
+	for _, x := range m.Cluster.Spec.EtcdClusters {
 		if x.EnableEtcdTLS {
 			return true
 		}
@@ -301,39 +352,52 @@ func (c *KopsModelContext) UseEtcdTLS() bool {
 	return false
 }
 
+// UseSSHKey returns true if SSHKeyName from the cluster spec is not set to an empty string (""). Setting SSHKeyName
+// to an empty string indicates that an SSH key should not be set on instances.
+func (m *KopsModelContext) UseSSHKey() bool {
+	sshKeyName := m.Cluster.Spec.SSHKeyName
+	return sshKeyName == nil || *sshKeyName != ""
+}
+
 // KubernetesVersion parses the semver version of kubernetes, from the cluster spec
-func (c *KopsModelContext) KubernetesVersion() semver.Version {
+func (m *KopsModelContext) KubernetesVersion() semver.Version {
 	// TODO: Remove copy-pasting c.f. https://github.com/kubernetes/kops/blob/master/pkg/model/components/context.go#L32
 
-	kubernetesVersion := c.Cluster.Spec.KubernetesVersion
+	kubernetesVersion := m.Cluster.Spec.KubernetesVersion
 
 	if kubernetesVersion == "" {
-		glog.Fatalf("KubernetesVersion is required")
+		klog.Fatalf("KubernetesVersion is required")
 	}
 
 	sv, err := util.ParseKubernetesVersion(kubernetesVersion)
 	if err != nil {
-		glog.Fatalf("unable to determine kubernetes version from %q", kubernetesVersion)
+		klog.Fatalf("unable to determine kubernetes version from %q", kubernetesVersion)
 	}
 
 	return *sv
 }
 
 // IsKubernetesGTE checks if the kubernetes version is at least version, ignoring prereleases / patches
-func (c *KopsModelContext) IsKubernetesGTE(version string) bool {
-	return util.IsKubernetesGTE(version, c.KubernetesVersion())
+func (m *KopsModelContext) IsKubernetesGTE(version string) bool {
+	return util.IsKubernetesGTE(version, m.KubernetesVersion())
 }
 
-func (c *KopsModelContext) WellKnownServiceIP(id int) (net.IP, error) {
-	return components.WellKnownServiceIP(&c.Cluster.Spec, id)
+// IsKubernetesLT checks if the kubernetes version is before the specified version, ignoring prereleases / patches
+func (m *KopsModelContext) IsKubernetesLT(version string) bool {
+	return !m.IsKubernetesGTE(version)
+}
+
+// WellKnownServiceIP returns a service ip with the service cidr
+func (m *KopsModelContext) WellKnownServiceIP(id int) (net.IP, error) {
+	return components.WellKnownServiceIP(&m.Cluster.Spec, id)
 }
 
 // NodePortRange returns the range of ports allocated to NodePorts
-func (c *KopsModelContext) NodePortRange() (utilnet.PortRange, error) {
+func (m *KopsModelContext) NodePortRange() (utilnet.PortRange, error) {
 	// defaultServiceNodePortRange is the default port range for NodePort services.
 	defaultServiceNodePortRange := utilnet.PortRange{Base: 30000, Size: 2768}
 
-	kubeApiServer := c.Cluster.Spec.KubeAPIServer
+	kubeApiServer := m.Cluster.Spec.KubeAPIServer
 	if kubeApiServer != nil && kubeApiServer.ServiceNodePortRange != "" {
 		err := defaultServiceNodePortRange.Set(kubeApiServer.ServiceNodePortRange)
 		if err != nil {

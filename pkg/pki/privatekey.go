@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,8 +30,13 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
+
+// DefaultPrivateKeySize is the key size to use when generating private keys
+// It can be overridden by the KOPS_RSA_PRIVATE_KEY_SIZE env var, or by tests
+// (as generating RSA keys can be a bottleneck for testing)
+var DefaultPrivateKeySize = 2048
 
 func ParsePEMPrivateKey(data []byte) (*PrivateKey, error) {
 	k, err := parsePEMPrivateKey(data)
@@ -45,17 +50,19 @@ func ParsePEMPrivateKey(data []byte) (*PrivateKey, error) {
 }
 
 func GeneratePrivateKey() (*PrivateKey, error) {
-	var rsaKeySize int64 = 2048
+	var rsaKeySize = DefaultPrivateKeySize
 
 	if os.Getenv("KOPS_RSA_PRIVATE_KEY_SIZE") != "" {
-		var intErr error
-		rsaKeySize, intErr = strconv.ParseInt(os.Getenv("KOPS_RSA_PRIVATE_KEY_SIZE"), 0, 0)
-		if intErr != nil {
-			return nil, fmt.Errorf("error getting RSA private key size: %v", intErr)
+		s := os.Getenv("KOPS_RSA_PRIVATE_KEY_SIZE")
+		if v, err := strconv.Atoi(s); err != nil {
+			return nil, fmt.Errorf("error parsing KOPS_RSA_PRIVATE_KEY_SIZE=%s as integer", s)
+		} else {
+			rsaKeySize = int(v)
+			klog.V(4).Infof("Generating key of size %d, set by KOPS_RSA_PRIVATE_KEY_SIZE env var", rsaKeySize)
 		}
 	}
 
-	rsaKey, err := rsa.GenerateKey(crypto_rand.Reader, int(rsaKeySize))
+	rsaKey, err := rsa.GenerateKey(crypto_rand.Reader, rsaKeySize)
 	if err != nil {
 		return nil, fmt.Errorf("error generating RSA private key: %v", err)
 	}
@@ -107,7 +114,7 @@ func (k *PrivateKey) UnmarshalJSON(b []byte) (err error) {
 			if err2 == nil {
 				r2, err2 := parsePEMPrivateKey(d)
 				if err2 == nil {
-					glog.Warningf("used base64 decode of PrivateKey")
+					klog.Warningf("used base64 decode of PrivateKey")
 					r = r2
 					err = nil
 				}
@@ -158,6 +165,18 @@ func (k *PrivateKey) WriteTo(w io.Writer) (int64, error) {
 	return data.WriteTo(w)
 }
 
+func (k *PrivateKey) WriteToFile(filename string, perm os.FileMode) error {
+	f, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	_, err = k.WriteTo(f)
+	if err1 := f.Close(); err == nil {
+		err = err1
+	}
+	return err
+}
+
 func parsePEMPrivateKey(pemData []byte) (crypto.PrivateKey, error) {
 	for {
 		block, rest := pem.Decode(pemData)
@@ -166,17 +185,17 @@ func parsePEMPrivateKey(pemData []byte) (crypto.PrivateKey, error) {
 		}
 
 		if block.Type == "RSA PRIVATE KEY" {
-			glog.V(10).Infof("Parsing pem block: %q", block.Type)
+			klog.V(10).Infof("Parsing pem block: %q", block.Type)
 			return x509.ParsePKCS1PrivateKey(block.Bytes)
 		} else if block.Type == "PRIVATE KEY" {
-			glog.V(10).Infof("Parsing pem block: %q", block.Type)
+			klog.V(10).Infof("Parsing pem block: %q", block.Type)
 			k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 			if err != nil {
 				return nil, err
 			}
 			return k.(crypto.PrivateKey), nil
 		} else {
-			glog.Infof("Ignoring unexpected PEM block: %q", block.Type)
+			klog.Infof("Ignoring unexpected PEM block: %q", block.Type)
 		}
 
 		pemData = rest

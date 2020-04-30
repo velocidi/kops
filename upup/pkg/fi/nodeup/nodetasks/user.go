@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,9 +19,10 @@ package nodetasks
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/cloudinit"
 	"k8s.io/kops/upup/pkg/fi/nodeup/local"
@@ -32,6 +33,7 @@ import (
 type UserTask struct {
 	Name string
 
+	UID   int    `json:"uid"`
 	Shell string `json:"shell"`
 	Home  string `json:"home"`
 }
@@ -49,7 +51,7 @@ func (f *UserTask) GetName() *string {
 }
 
 func (f *UserTask) SetName(name string) {
-	glog.Fatalf("SetName not supported for User task")
+	klog.Fatalf("SetName not supported for User task")
 }
 
 func NewUserTask(name string, contents string, meta string) (fi.Task, error) {
@@ -74,6 +76,7 @@ func (e *UserTask) Find(c *fi.Context) (*UserTask, error) {
 
 	actual := &UserTask{
 		Name:  e.Name,
+		UID:   info.Uid,
 		Shell: info.Shell,
 		Home:  info.Home,
 	}
@@ -91,6 +94,9 @@ func (_ *UserTask) CheckChanges(a, e, changes *UserTask) error {
 
 func buildUseraddArgs(e *UserTask) []string {
 	var args []string
+	if e.UID != 0 {
+		args = append(args, "-u", strconv.Itoa(e.UID))
+	}
 	if e.Shell != "" {
 		args = append(args, "-s", e.Shell)
 	}
@@ -104,9 +110,9 @@ func buildUseraddArgs(e *UserTask) []string {
 func (_ *UserTask) RenderLocal(t *local.LocalTarget, a, e, changes *UserTask) error {
 	if a == nil {
 		args := buildUseraddArgs(e)
-		glog.Infof("Creating user %q", e.Name)
+		klog.Infof("Creating user %q", e.Name)
 		cmd := exec.Command("useradd", args...)
-		glog.V(2).Infof("running command: useradd %s", strings.Join(args, " "))
+		klog.V(2).Infof("running command: useradd %s", strings.Join(args, " "))
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("error creating user: %v\nOutput: %s", err, output)
@@ -114,6 +120,9 @@ func (_ *UserTask) RenderLocal(t *local.LocalTarget, a, e, changes *UserTask) er
 	} else {
 		var args []string
 
+		if changes.UID != 0 {
+			args = append(args, "-u", strconv.Itoa(e.UID))
+		}
 		if changes.Shell != "" {
 			args = append(args, "-s", e.Shell)
 		}
@@ -123,9 +132,9 @@ func (_ *UserTask) RenderLocal(t *local.LocalTarget, a, e, changes *UserTask) er
 
 		if len(args) != 0 {
 			args = append(args, e.Name)
-			glog.Infof("Reconfiguring user %q", e.Name)
+			klog.Infof("Reconfiguring user %q", e.Name)
 			cmd := exec.Command("usermod", args...)
-			glog.V(2).Infof("running command: usermod %s", strings.Join(args, " "))
+			klog.V(2).Infof("running command: usermod %s", strings.Join(args, " "))
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("error reconfiguring user: %v\nOutput: %s", err, output)
@@ -140,7 +149,7 @@ func (_ *UserTask) RenderCloudInit(t *cloudinit.CloudInitTarget, a, e, changes *
 	args := buildUseraddArgs(e)
 	cmd := []string{"useradd"}
 	cmd = append(cmd, args...)
-	glog.Infof("Creating user %q", e.Name)
+	klog.Infof("Creating user %q", e.Name)
 	t.AddCommand(cloudinit.Once, cmd...)
 
 	return nil

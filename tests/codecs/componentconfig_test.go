@@ -30,11 +30,11 @@ func TestSerializeEmptyCluster(t *testing.T) {
 	cluster.Spec.KubeControllerManager = &v1alpha2.KubeControllerManagerConfig{}
 	yaml, err := kopscodecs.ToVersionedYamlWithVersion(cluster, v1alpha2.SchemeGroupVersion)
 	if err != nil {
-		t.Errorf("unexpected error marshalling Cluster: %v", err)
+		t.Errorf("unexpected error marshaling Cluster: %v", err)
 	}
 
 	yamlString := string(yaml)
-	expected := `apiVersion: kops/v1alpha2
+	expected := `apiVersion: kops.k8s.io/v1alpha2
 kind: Cluster
 metadata:
   creationTimestamp: null

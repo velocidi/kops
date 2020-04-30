@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2016 The Kubernetes Authors.
+# Copyright 2019 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,21 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -o errexit
-set -o nounset
-set -o pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-KOPS_ROOT=$(git rev-parse --show-toplevel)
-TMP_GOPATH=$(mktemp -d)
 cd "${KOPS_ROOT}"
 
-"${KOPS_ROOT}/hack/go_install_from_commit.sh" \
-  github.com/bazelbuild/bazel-gazelle/cmd/gazelle \
-  8bc6a862933eaa0d7431e15b308ceadc5729a6f9 \
-  "${TMP_GOPATH}"
+TMP_OUT=$(mktemp -d)
+trap "{ rm -rf ${TMP_OUT}; }" EXIT
 
+GOBIN="${TMP_OUT}" go install ./vendor/github.com/bazelbuild/bazel-gazelle/cmd/gazelle
 
-gazelle_diff=$("${TMP_GOPATH}/bin/gazelle" fix \
+gazelle_diff=$("${TMP_OUT}/gazelle" fix \
   -external=vendored \
   -mode=diff \
   -proto=disable \

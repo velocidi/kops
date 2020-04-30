@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,26 +21,31 @@ import (
 	"sort"
 	"time"
 
-	"github.com/golang/glog"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/dns"
+	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awstasks"
 	"k8s.io/kops/upup/pkg/fi/fitasks"
+
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog"
 )
 
+// LoadBalancerDefaultIdleTimeout is the default idle time for the ELB
 const LoadBalancerDefaultIdleTimeout = 5 * time.Minute
 
 // APILoadBalancerBuilder builds a LoadBalancer for accessing the API
 type APILoadBalancerBuilder struct {
 	*AWSModelContext
+
 	Lifecycle         *fi.Lifecycle
 	SecurityLifecycle *fi.Lifecycle
 }
 
 var _ fi.ModelBuilder = &APILoadBalancerBuilder{}
 
+// Build is responsible for building the KubeAPI tasks for the aws model
 func (b *APILoadBalancerBuilder) Build(c *fi.ModelBuilderContext) error {
 	// Configuration where an ELB fronts the API
 	if !b.UseLoadBalancerForAPI() {
@@ -102,36 +107,63 @@ func (b *APILoadBalancerBuilder) Build(c *fi.ModelBuilderContext) error {
 			idleTimeout = time.Second * time.Duration(*lbSpec.IdleTimeoutSeconds)
 		}
 
+		listeners := map[string]*awstasks.LoadBalancerListener{
+			"443": {InstancePort: 443},
+		}
+
+		if lbSpec.SSLCertificate != "" {
+			listeners["443"] = &awstasks.LoadBalancerListener{InstancePort: 443, SSLCertificateID: lbSpec.SSLCertificate}
+		}
+
+		if lbSpec.SecurityGroupOverride != nil {
+			klog.V(1).Infof("WARNING: You are overwriting the Load Balancers, Security Group. When this is done you are responsible for ensure the correct rules!")
+		}
+
+		tags := b.CloudTags(loadBalancerName, false)
+		for k, v := range b.Cluster.Spec.CloudLabels {
+			tags[k] = v
+		}
+		// Override the returned name to be the expected ELB name
+		tags["Name"] = "api." + b.ClusterName()
+
 		elb = &awstasks.LoadBalancer{
-			Name:      s("api." + b.ClusterName()),
+			Name:      fi.String("api." + b.ClusterName()),
 			Lifecycle: b.Lifecycle,
 
-			LoadBalancerName: s(loadBalancerName),
+			LoadBalancerName: fi.String(loadBalancerName),
 			SecurityGroups: []*awstasks.SecurityGroup{
 				b.LinkToELBSecurityGroup("api"),
 			},
-			Subnets: elbSubnets,
-			Listeners: map[string]*awstasks.LoadBalancerListener{
-				"443": {InstancePort: 443},
-			},
+			Subnets:   elbSubnets,
+			Listeners: listeners,
 
 			// Configure fast-recovery health-checks
 			HealthCheck: &awstasks.LoadBalancerHealthCheck{
-				Target:             s("SSL:443"),
-				Timeout:            i64(5),
-				Interval:           i64(10),
-				HealthyThreshold:   i64(2),
-				UnhealthyThreshold: i64(2),
+				Target:             fi.String("SSL:443"),
+				Timeout:            fi.Int64(5),
+				Interval:           fi.Int64(10),
+				HealthyThreshold:   fi.Int64(2),
+				UnhealthyThreshold: fi.Int64(2),
 			},
 
 			ConnectionSettings: &awstasks.LoadBalancerConnectionSettings{
-				IdleTimeout: i64(int64(idleTimeout.Seconds())),
+				IdleTimeout: fi.Int64(int64(idleTimeout.Seconds())),
 			},
+
+			Tags: tags,
+		}
+
+		if lbSpec.CrossZoneLoadBalancing == nil {
+			lbSpec.CrossZoneLoadBalancing = fi.Bool(false)
+		}
+
+		elb.CrossZoneLoadBalancing = &awstasks.LoadBalancerCrossZoneLoadBalancing{
+			Enabled: lbSpec.CrossZoneLoadBalancing,
 		}
 
 		switch lbSpec.Type {
 		case kops.LoadBalancerTypeInternal:
-			elb.Scheme = s("internal")
+			elb.Scheme = fi.String("internal")
 		case kops.LoadBalancerTypePublic:
 			elb.Scheme = nil
 		default:
@@ -142,28 +174,33 @@ func (b *APILoadBalancerBuilder) Build(c *fi.ModelBuilderContext) error {
 	}
 
 	// Create security group for API ELB
+	var lbSG *awstasks.SecurityGroup
 	{
-		t := &awstasks.SecurityGroup{
-			Name:      s(b.ELBSecurityGroupName("api")),
-			Lifecycle: b.SecurityLifecycle,
-
-			VPC:              b.LinkToVPC(),
-			Description:      s("Security group for api ELB"),
+		lbSG = &awstasks.SecurityGroup{
+			Name:             fi.String(b.ELBSecurityGroupName("api")),
+			Lifecycle:        b.SecurityLifecycle,
+			Description:      fi.String("Security group for api ELB"),
 			RemoveExtraRules: []string{"port=443"},
+			VPC:              b.LinkToVPC(),
 		}
-		t.Tags = b.CloudTags(*t.Name, false)
-		c.AddTask(t)
+		lbSG.Tags = b.CloudTags(*lbSG.Name, false)
+
+		if lbSpec.SecurityGroupOverride != nil {
+			lbSG.ID = fi.String(*lbSpec.SecurityGroupOverride)
+			lbSG.Shared = fi.Bool(true)
+		}
+
+		c.AddTask(lbSG)
 	}
 
 	// Allow traffic from ELB to egress freely
 	{
 		t := &awstasks.SecurityGroupRule{
-			Name:      s("api-elb-egress"),
-			Lifecycle: b.SecurityLifecycle,
-
-			SecurityGroup: b.LinkToELBSecurityGroup("api"),
+			Name:          fi.String("api-elb-egress"),
+			Lifecycle:     b.SecurityLifecycle,
+			CIDR:          fi.String("0.0.0.0/0"),
 			Egress:        fi.Bool(true),
-			CIDR:          s("0.0.0.0/0"),
+			SecurityGroup: lbSG,
 		}
 		c.AddTask(t)
 	}
@@ -172,16 +209,26 @@ func (b *APILoadBalancerBuilder) Build(c *fi.ModelBuilderContext) error {
 	{
 		for _, cidr := range b.Cluster.Spec.KubernetesAPIAccess {
 			t := &awstasks.SecurityGroupRule{
-				Name:      s("https-api-elb-" + cidr),
-				Lifecycle: b.SecurityLifecycle,
-
-				SecurityGroup: b.LinkToELBSecurityGroup("api"),
-				CIDR:          s(cidr),
-				FromPort:      i64(443),
-				ToPort:        i64(443),
-				Protocol:      s("tcp"),
+				Name:          fi.String("https-api-elb-" + cidr),
+				Lifecycle:     b.SecurityLifecycle,
+				CIDR:          fi.String(cidr),
+				FromPort:      fi.Int64(443),
+				Protocol:      fi.String("tcp"),
+				SecurityGroup: lbSG,
+				ToPort:        fi.Int64(443),
 			}
 			c.AddTask(t)
+
+			// Allow ICMP traffic required for PMTU discovery
+			c.AddTask(&awstasks.SecurityGroupRule{
+				Name:          fi.String("icmp-pmtu-api-elb-" + cidr),
+				Lifecycle:     b.SecurityLifecycle,
+				CIDR:          fi.String(cidr),
+				FromPort:      fi.Int64(3),
+				Protocol:      fi.String("icmp"),
+				SecurityGroup: lbSG,
+				ToPort:        fi.Int64(4),
+			})
 		}
 	}
 
@@ -189,11 +236,10 @@ func (b *APILoadBalancerBuilder) Build(c *fi.ModelBuilderContext) error {
 	{
 		for _, id := range b.Cluster.Spec.API.LoadBalancer.AdditionalSecurityGroups {
 			t := &awstasks.SecurityGroup{
-				Name:   fi.String(id),
-				ID:     fi.String(id),
-				Shared: fi.Bool(true),
-
+				Name:      fi.String(id),
 				Lifecycle: b.SecurityLifecycle,
+				ID:        fi.String(id),
+				Shared:    fi.Bool(true),
 			}
 			if err := c.EnsureTask(t); err != nil {
 				return err
@@ -202,19 +248,25 @@ func (b *APILoadBalancerBuilder) Build(c *fi.ModelBuilderContext) error {
 		}
 	}
 
+	masterGroups, err := b.GetSecurityGroups(kops.InstanceGroupRoleMaster)
+	if err != nil {
+		return err
+	}
+
 	// Allow HTTPS to the master instances from the ELB
 	{
-		t := &awstasks.SecurityGroupRule{
-			Name:      s("https-elb-to-master"),
-			Lifecycle: b.SecurityLifecycle,
-
-			SecurityGroup: b.LinkToSecurityGroup(kops.InstanceGroupRoleMaster),
-			SourceGroup:   b.LinkToELBSecurityGroup("api"),
-			FromPort:      i64(443),
-			ToPort:        i64(443),
-			Protocol:      s("tcp"),
+		for _, masterGroup := range masterGroups {
+			suffix := masterGroup.Suffix
+			c.AddTask(&awstasks.SecurityGroupRule{
+				Name:          fi.String(fmt.Sprintf("https-elb-to-master%s", suffix)),
+				Lifecycle:     b.SecurityLifecycle,
+				FromPort:      fi.Int64(443),
+				Protocol:      fi.String("tcp"),
+				SecurityGroup: masterGroup.Task,
+				SourceGroup:   lbSG,
+				ToPort:        fi.Int64(443),
+			})
 		}
-		c.AddTask(t)
 	}
 
 	if dns.IsGossipHostname(b.Cluster.Name) || b.UsePrivateDNS() {
@@ -229,16 +281,18 @@ func (b *APILoadBalancerBuilder) Build(c *fi.ModelBuilderContext) error {
 		masterKeypair.AlternateNameTasks = append(masterKeypair.AlternateNameTasks, elb)
 	}
 
-	for _, ig := range b.MasterInstanceGroups() {
-		t := &awstasks.LoadBalancerAttachment{
-			Name:      s("api-" + ig.ObjectMeta.Name),
-			Lifecycle: b.Lifecycle,
-
-			LoadBalancer:     b.LinkToELB("api"),
-			AutoscalingGroup: b.LinkToAutoscalingGroup(ig),
+	// When Spotinst Elastigroups are used, there is no need to create
+	// a separate task for the attachment of the load balancer since this
+	// is already done as part of the Elastigroup's creation, if needed.
+	if !featureflag.Spotinst.Enabled() {
+		for _, ig := range b.MasterInstanceGroups() {
+			c.AddTask(&awstasks.LoadBalancerAttachment{
+				Name:             fi.String("api-" + ig.ObjectMeta.Name),
+				Lifecycle:        b.Lifecycle,
+				AutoscalingGroup: b.LinkToAutoscalingGroup(ig),
+				LoadBalancer:     b.LinkToELB("api"),
+			})
 		}
-
-		c.AddTask(t)
 	}
 
 	return nil
@@ -303,7 +357,7 @@ func (b *APILoadBalancerBuilder) chooseBestSubnetForELB(zone string, subnets []*
 	sort.Sort(ByScoreDescending(scoredSubnets))
 
 	if scoredSubnets[0].score == scoredSubnets[1].score {
-		glog.V(2).Infof("Making arbitrary choice between subnets in zone %q to attach to ELB (%q vs %q)", zone, scoredSubnets[0].subnet.Name, scoredSubnets[1].subnet.Name)
+		klog.V(2).Infof("Making arbitrary choice between subnets in zone %q to attach to ELB (%q vs %q)", zone, scoredSubnets[0].subnet.Name, scoredSubnets[1].subnet.Name)
 	}
 
 	return scoredSubnets[0].subnet

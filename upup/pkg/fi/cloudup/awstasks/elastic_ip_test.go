@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,7 +32,10 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 )
 
-const defaultDeadline = 2 * time.Second
+var testRunTasksOptions = fi.RunTasksOptions{
+	MaxTaskDuration:         2 * time.Second,
+	WaitAfterAllTasksFailed: 500 * time.Millisecond,
+}
 
 func TestElasticIPCreate(t *testing.T) {
 	cloud := awsup.BuildMockAWSCloud("us-east-1", "abc")
@@ -77,7 +80,7 @@ func TestElasticIPCreate(t *testing.T) {
 			t.Fatalf("error building context: %v", err)
 		}
 
-		if err := context.RunTasks(defaultDeadline); err != nil {
+		if err := context.RunTasks(testRunTasksOptions); err != nil {
 			t.Fatalf("unexpected error during Run: %v", err)
 		}
 
@@ -119,7 +122,7 @@ func checkNoChanges(t *testing.T, cloud fi.Cloud, allTasks map[string]fi.Task) {
 		t.Fatalf("error building context: %v", err)
 	}
 
-	if err := context.RunTasks(defaultDeadline); err != nil {
+	if err := context.RunTasks(testRunTasksOptions); err != nil {
 		t.Fatalf("unexpected error during Run: %v", err)
 	}
 

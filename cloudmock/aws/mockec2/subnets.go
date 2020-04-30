@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 type subnetInfo struct {
@@ -57,12 +57,10 @@ func (m *MockEC2) SubnetIds() []string {
 
 func (m *MockEC2) CreateSubnetRequest(*ec2.CreateSubnetInput) (*request.Request, *ec2.CreateSubnetOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) CreateSubnetWithContext(aws.Context, *ec2.CreateSubnetInput, ...request.Option) (*ec2.CreateSubnetOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) CreateSubnetWithId(request *ec2.CreateSubnetInput, id string) (*ec2.CreateSubnetOutput, error) {
@@ -90,7 +88,7 @@ func (m *MockEC2) CreateSubnetWithId(request *ec2.CreateSubnetInput, id string) 
 }
 
 func (m *MockEC2) CreateSubnet(request *ec2.CreateSubnetInput) (*ec2.CreateSubnetOutput, error) {
-	glog.Infof("CreateSubnet: %v", request)
+	klog.Infof("CreateSubnet: %v", request)
 
 	id := m.allocateId("subnet")
 	return m.CreateSubnetWithId(request, id)
@@ -98,19 +96,17 @@ func (m *MockEC2) CreateSubnet(request *ec2.CreateSubnetInput) (*ec2.CreateSubne
 
 func (m *MockEC2) DescribeSubnetsRequest(*ec2.DescribeSubnetsInput) (*request.Request, *ec2.DescribeSubnetsOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) DescribeSubnetsWithContext(aws.Context, *ec2.DescribeSubnetsInput, ...request.Option) (*ec2.DescribeSubnetsOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) DescribeSubnets(request *ec2.DescribeSubnetsInput) (*ec2.DescribeSubnetsOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DescribeSubnets: %v", request)
+	klog.Infof("DescribeSubnets: %v", request)
 
 	if len(request.SubnetIds) != 0 {
 		request.Filters = append(request.Filters, &ec2.Filter{Name: s("subnet-id"), Values: request.SubnetIds})
@@ -167,7 +163,7 @@ func (m *MockEC2) AssociateRouteTable(request *ec2.AssociateRouteTableInput) (*e
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("AuthorizeSecurityGroupIngress: %v", request)
+	klog.Infof("AuthorizeSecurityGroupIngress: %v", request)
 
 	if aws.StringValue(request.SubnetId) == "" {
 		return nil, fmt.Errorf("SubnetId not specified")
@@ -177,7 +173,7 @@ func (m *MockEC2) AssociateRouteTable(request *ec2.AssociateRouteTableInput) (*e
 	}
 
 	if request.DryRun != nil {
-		glog.Fatalf("DryRun")
+		klog.Fatalf("DryRun")
 	}
 
 	subnet := m.subnets[*request.SubnetId]
@@ -209,18 +205,16 @@ func (m *MockEC2) AssociateRouteTable(request *ec2.AssociateRouteTableInput) (*e
 }
 func (m *MockEC2) AssociateRouteTableWithContext(aws.Context, *ec2.AssociateRouteTableInput, ...request.Option) (*ec2.AssociateRouteTableOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) AssociateRouteTableRequest(*ec2.AssociateRouteTableInput) (*request.Request, *ec2.AssociateRouteTableOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) DeleteSubnet(request *ec2.DeleteSubnetInput) (*ec2.DeleteSubnetOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DeleteSubnet: %v", request)
+	klog.Infof("DeleteSubnet: %v", request)
 
 	id := aws.StringValue(request.SubnetId)
 	o := m.subnets[id]
@@ -234,9 +228,7 @@ func (m *MockEC2) DeleteSubnet(request *ec2.DeleteSubnetInput) (*ec2.DeleteSubne
 
 func (m *MockEC2) DeleteSubnetWithContext(aws.Context, *ec2.DeleteSubnetInput, ...request.Option) (*ec2.DeleteSubnetOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) DeleteSubnetRequest(*ec2.DeleteSubnetInput) (*request.Request, *ec2.DeleteSubnetOutput) {
 	panic("Not implemented")
-	return nil, nil
 }

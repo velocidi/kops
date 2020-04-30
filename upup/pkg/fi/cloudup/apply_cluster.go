@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,16 +17,18 @@ limitations under the License.
 package cloudup
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
 	"path"
 	"strings"
-	"time"
+
+	"k8s.io/kops/pkg/k8sversion"
 
 	"github.com/blang/semver"
-	"github.com/golang/glog"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog"
 	kopsbase "k8s.io/kops"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/registry"
@@ -39,16 +41,21 @@ import (
 	"k8s.io/kops/pkg/dns"
 	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/pkg/model"
+	"k8s.io/kops/pkg/model/alimodel"
 	"k8s.io/kops/pkg/model/awsmodel"
 	"k8s.io/kops/pkg/model/components"
+	"k8s.io/kops/pkg/model/components/etcdmanager"
 	"k8s.io/kops/pkg/model/domodel"
 	"k8s.io/kops/pkg/model/gcemodel"
 	"k8s.io/kops/pkg/model/openstackmodel"
+	"k8s.io/kops/pkg/model/spotinstmodel"
 	"k8s.io/kops/pkg/model/vspheremodel"
 	"k8s.io/kops/pkg/resources/digitalocean"
 	"k8s.io/kops/pkg/templates"
 	"k8s.io/kops/upup/models"
 	"k8s.io/kops/upup/pkg/fi"
+	"k8s.io/kops/upup/pkg/fi/cloudup/alitasks"
+	"k8s.io/kops/upup/pkg/fi/cloudup/aliup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awstasks"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/baremetal"
@@ -59,16 +66,17 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/gcetasks"
 	"k8s.io/kops/upup/pkg/fi/cloudup/openstack"
 	"k8s.io/kops/upup/pkg/fi/cloudup/openstacktasks"
+	"k8s.io/kops/upup/pkg/fi/cloudup/spotinsttasks"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
 	"k8s.io/kops/upup/pkg/fi/cloudup/vsphere"
 	"k8s.io/kops/upup/pkg/fi/cloudup/vspheretasks"
 	"k8s.io/kops/upup/pkg/fi/fitasks"
+	"k8s.io/kops/util/pkg/hashing"
 	"k8s.io/kops/util/pkg/vfs"
 )
 
 const (
-	DefaultMaxTaskDuration = 10 * time.Minute
-	starline               = "*********************************************************************************\n"
+	starline = "*********************************************************************************"
 )
 
 var (
@@ -80,8 +88,14 @@ var (
 	AlphaAllowGCE = featureflag.New("AlphaAllowGCE", featureflag.Bool(false))
 	// AlphaAllowVsphere is a feature flag that gates vsphere support while it is alpha
 	AlphaAllowVsphere = featureflag.New("AlphaAllowVsphere", featureflag.Bool(false))
+	// AlphaAllowALI is a feature flag that gates aliyun support while it is alpha
+	AlphaAllowALI = featureflag.New("AlphaAllowALI", featureflag.Bool(false))
 	// CloudupModels a list of supported models
-	CloudupModels = []string{"config", "proto", "cloudup"}
+	CloudupModels = []string{"proto", "cloudup"}
+	// OldestSupportedKubernetesVersion is the oldest kubernetes version that is supported in Kops
+	OldestSupportedKubernetesVersion = "1.9.0"
+	// OldestRecommendedKubernetesVersion is the oldest kubernetes version that is not deprecated in Kops
+	OldestRecommendedKubernetesVersion = "1.11.0"
 )
 
 type ApplyClusterCmd struct {
@@ -111,14 +125,15 @@ type ApplyClusterCmd struct {
 	// Formats:
 	//  raw url: http://... or https://...
 	//  url with hash: <hex>@http://... or <hex>@https://...
-	Assets []string
+	Assets []*MirroredAsset
 
 	Clientset simple.Clientset
 
 	// DryRun is true if this is only a dry run
 	DryRun bool
 
-	MaxTaskDuration time.Duration
+	// RunTasksOptions defines parameters for task execution, e.g. retry interval
+	RunTasksOptions *fi.RunTasksOptions
 
 	// The channel we are using
 	channel *kops.Channel
@@ -135,13 +150,9 @@ type ApplyClusterCmd struct {
 	TaskMap map[string]fi.Task
 }
 
-func (c *ApplyClusterCmd) Run() error {
-	if c.MaxTaskDuration == 0 {
-		c.MaxTaskDuration = DefaultMaxTaskDuration
-	}
-
+func (c *ApplyClusterCmd) Run(ctx context.Context) error {
 	if c.InstanceGroups == nil {
-		list, err := c.Clientset.InstanceGroupsFor(c.Cluster).List(metav1.ListOptions{})
+		list, err := c.Clientset.InstanceGroupsFor(c.Cluster).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return err
 		}
@@ -267,12 +278,40 @@ func (c *ApplyClusterCmd) Run() error {
 
 	// Normalize k8s version
 	versionWithoutV := strings.TrimSpace(cluster.Spec.KubernetesVersion)
-	if strings.HasPrefix(versionWithoutV, "v") {
-		versionWithoutV = versionWithoutV[1:]
-	}
+	versionWithoutV = strings.TrimPrefix(versionWithoutV, "v")
 	if cluster.Spec.KubernetesVersion != versionWithoutV {
-		glog.Warningf("Normalizing kubernetes version: %q -> %q", cluster.Spec.KubernetesVersion, versionWithoutV)
+		klog.Warningf("Normalizing kubernetes version: %q -> %q", cluster.Spec.KubernetesVersion, versionWithoutV)
 		cluster.Spec.KubernetesVersion = versionWithoutV
+	}
+
+	kv, err := k8sversion.Parse(cluster.Spec.KubernetesVersion)
+	if err != nil {
+		return err
+	}
+
+	// check if we should recommend turning off anonymousAuth on k8s versions gte than 1.10
+	// we do 1.10 since this is a really critical issues and 1.10 has it
+	if kv.IsGTE("1.10") {
+		// we do a check here because setting modifying the kubelet object messes with the output
+		warn := false
+		if cluster.Spec.Kubelet == nil {
+			warn = true
+		} else if cluster.Spec.Kubelet.AnonymousAuth == nil {
+			warn = true
+		}
+
+		if warn {
+			fmt.Println("")
+			fmt.Printf("%s\n", starline)
+			fmt.Println("")
+			fmt.Println("Kubelet anonymousAuth is currently turned on. This allows RBAC escalation and remote code execution possibilities.")
+			fmt.Println("It is highly recommended you turn it off by setting 'spec.kubelet.anonymousAuth' to 'false' via 'kops edit cluster'")
+			fmt.Println("")
+			fmt.Println("See https://kops.sigs.k8s.io/security/#kubelet-api")
+			fmt.Println("")
+			fmt.Printf("%s\n", starline)
+			fmt.Println("")
+		}
 	}
 
 	if err := c.AddFileAssets(assetBuilder); err != nil {
@@ -332,6 +371,8 @@ func (c *ApplyClusterCmd) Run() error {
 				return fmt.Errorf("GCE support is currently alpha, and is feature-gated.  export KOPS_FEATURE_FLAGS=AlphaAllowGCE")
 			}
 
+			modelContext.SSHPublicKeys = sshPublicKeys
+
 			l.AddTypes(map[string]interface{}{
 				"Disk":                 &gcetasks.Disk{},
 				"Instance":             &gcetasks.Instance{},
@@ -349,11 +390,16 @@ func (c *ApplyClusterCmd) Run() error {
 				return fmt.Errorf("DigitalOcean support is currently (very) alpha and is feature-gated. export KOPS_FEATURE_FLAGS=AlphaAllowDO to enable it")
 			}
 
+			if len(sshPublicKeys) == 0 && (c.Cluster.Spec.SSHKeyName == nil || *c.Cluster.Spec.SSHKeyName == "") {
+				return fmt.Errorf("SSH public key must be specified when running with DigitalOcean (create with `kops create secret --name %s sshpublickey admin -i ~/.ssh/id_rsa.pub`)", cluster.ObjectMeta.Name)
+			}
+
 			modelContext.SSHPublicKeys = sshPublicKeys
 
 			l.AddTypes(map[string]interface{}{
-				"volume":  &dotasks.Volume{},
-				"droplet": &dotasks.Droplet{},
+				"volume":       &dotasks.Volume{},
+				"droplet":      &dotasks.Droplet{},
+				"loadbalancer": &dotasks.LoadBalancer{},
 			})
 		}
 	case kops.CloudProviderAWS:
@@ -377,16 +423,16 @@ func (c *ApplyClusterCmd) Run() error {
 				"iamRolePolicy":          &awstasks.IAMRolePolicy{},
 
 				// VPC / Networking
-				"dhcpOptions":           &awstasks.DHCPOptions{},
-				"internetGateway":       &awstasks.InternetGateway{},
-				"route":                 &awstasks.Route{},
-				"routeTable":            &awstasks.RouteTable{},
-				"routeTableAssociation": &awstasks.RouteTableAssociation{},
-				"securityGroup":         &awstasks.SecurityGroup{},
-				"securityGroupRule":     &awstasks.SecurityGroupRule{},
-				"subnet":                &awstasks.Subnet{},
-				"vpc":                   &awstasks.VPC{},
-				"ngw":                   &awstasks.NatGateway{},
+				"dhcpOptions":                &awstasks.DHCPOptions{},
+				"internetGateway":            &awstasks.InternetGateway{},
+				"route":                      &awstasks.Route{},
+				"routeTable":                 &awstasks.RouteTable{},
+				"routeTableAssociation":      &awstasks.RouteTableAssociation{},
+				"securityGroup":              &awstasks.SecurityGroup{},
+				"securityGroupRule":          &awstasks.SecurityGroupRule{},
+				"subnet":                     &awstasks.Subnet{},
+				"vpc":                        &awstasks.VPC{},
+				"ngw":                        &awstasks.NatGateway{},
 				"vpcDHDCPOptionsAssociation": &awstasks.VPCDHCPOptionsAssociation{},
 
 				// ELB
@@ -396,25 +442,65 @@ func (c *ApplyClusterCmd) Run() error {
 				// Autoscaling
 				"autoscalingGroup":    &awstasks.AutoscalingGroup{},
 				"launchConfiguration": &awstasks.LaunchConfiguration{},
+
+				// Spotinst
+				"spotinstElastigroup": &spotinsttasks.Elastigroup{},
+				"spotinstOcean":       &spotinsttasks.Ocean{},
+				"spotinstLaunchSpec":  &spotinsttasks.LaunchSpec{},
 			})
 
-			if len(sshPublicKeys) == 0 {
+			if len(sshPublicKeys) == 0 && c.Cluster.Spec.SSHKeyName == nil {
 				return fmt.Errorf("SSH public key must be specified when running with AWS (create with `kops create secret --name %s sshpublickey admin -i ~/.ssh/id_rsa.pub`)", cluster.ObjectMeta.Name)
 			}
 
 			modelContext.SSHPublicKeys = sshPublicKeys
 
-			if len(sshPublicKeys) != 1 {
-				return fmt.Errorf("Exactly one 'admin' SSH public key can be specified when running with AWS; please delete a key using `kops delete secret`")
+			if len(sshPublicKeys) > 1 {
+				return fmt.Errorf("exactly one 'admin' SSH public key can be specified when running with AWS; please delete a key using `kops delete secret`")
 			}
 
 			l.TemplateFunctions["MachineTypeInfo"] = awsup.GetMachineTypeInfo
 		}
 
+	case kops.CloudProviderALI:
+		{
+			if !AlphaAllowALI.Enabled() {
+				return fmt.Errorf("aliyun support is currently alpha, and is feature-gated.  export KOPS_FEATURE_FLAGS=AlphaAllowALI")
+			}
+
+			aliCloud := cloud.(aliup.ALICloud)
+			region = aliCloud.Region()
+			l.AddTypes(map[string]interface{}{
+				"Vpc":                   &alitasks.VPC{},
+				"VSwitch":               &alitasks.VSwitch{},
+				"Disk":                  &alitasks.Disk{},
+				"SecurityGroup":         &alitasks.SecurityGroup{},
+				"SecurityGroupRule":     &alitasks.SecurityGroupRule{},
+				"LoadBalancer":          &alitasks.LoadBalancer{},
+				"LoadBalancerListener":  &alitasks.LoadBalancerListener{},
+				"LoadBalancerWhiteList": &alitasks.LoadBalancerWhiteList{},
+				"AutoscalingGroup":      &alitasks.ScalingGroup{},
+				"LaunchConfiguration":   &alitasks.LaunchConfiguration{},
+				"RAMPolicy":             &alitasks.RAMPolicy{},
+				"RAMRole":               &alitasks.RAMRole{},
+				"SSHKey":                &alitasks.SSHKey{},
+			})
+
+			if len(sshPublicKeys) == 0 {
+				return fmt.Errorf("SSH public key must be specified when running with ALICloud (create with `kops create secret --name %s sshpublickey admin -i ~/.ssh/id_rsa.pub`)", cluster.ObjectMeta.Name)
+			}
+
+			modelContext.SSHPublicKeys = sshPublicKeys
+
+			if len(sshPublicKeys) != 1 {
+				return fmt.Errorf("exactly one 'admin' SSH public key can be specified when running with ALICloud; please delete a key using `kops delete secret`")
+			}
+		}
+
 	case kops.CloudProviderVSphere:
 		{
 			if !AlphaAllowVsphere.Enabled() {
-				return fmt.Errorf("Vsphere support is currently alpha, and is feature-gated.  export KOPS_FEATURE_FLAGS=AlphaAllowVsphere")
+				return fmt.Errorf("vsphere support is currently alpha, and is feature-gated.  export KOPS_FEATURE_FLAGS=AlphaAllowVsphere")
 			}
 
 			vsphereCloud := cloud.(*vsphere.VSphereCloud)
@@ -437,14 +523,36 @@ func (c *ApplyClusterCmd) Run() error {
 
 	case kops.CloudProviderOpenstack:
 		{
+
 			osCloud := cloud.(openstack.OpenstackCloud)
 			region = osCloud.Region()
 
 			l.AddTypes(map[string]interface{}{
+				// Compute
+				"sshKey":      &openstacktasks.SSHKey{},
+				"serverGroup": &openstacktasks.ServerGroup{},
+				"instance":    &openstacktasks.Instance{},
 				// Networking
-				"network": &openstacktasks.Network{},
-				"router":  &openstacktasks.Router{},
+				"network":           &openstacktasks.Network{},
+				"subnet":            &openstacktasks.Subnet{},
+				"router":            &openstacktasks.Router{},
+				"securityGroup":     &openstacktasks.SecurityGroup{},
+				"securityGroupRule": &openstacktasks.SecurityGroupRule{},
+				// BlockStorage
+				"volume": &openstacktasks.Volume{},
+				// LB
+				"lb": &openstacktasks.LB{},
 			})
+
+			if len(sshPublicKeys) == 0 {
+				return fmt.Errorf("SSH public key must be specified when running with Openstack (create with `kops create secret --name %s sshpublickey admin -i ~/.ssh/id_rsa.pub`)", cluster.ObjectMeta.Name)
+			}
+
+			modelContext.SSHPublicKeys = sshPublicKeys
+
+			if len(sshPublicKeys) != 1 {
+				return fmt.Errorf("exactly one 'admin' SSH public key can be specified when running with Openstack; please delete a key using `kops delete secret`")
+			}
 		}
 	default:
 		return fmt.Errorf("unknown CloudProvider %q", cluster.Spec.CloudProvider)
@@ -453,7 +561,7 @@ func (c *ApplyClusterCmd) Run() error {
 	modelContext.Region = region
 
 	if dns.IsGossipHostname(cluster.ObjectMeta.Name) {
-		glog.Infof("Gossip DNS: skipping DNS validation")
+		klog.Infof("Gossip DNS: skipping DNS validation")
 	} else {
 		err = validateDNS(cluster, cloud)
 		if err != nil {
@@ -489,16 +597,28 @@ func (c *ApplyClusterCmd) Run() error {
 			if err != nil {
 				return fmt.Errorf("error loading templates: %v", err)
 			}
-			tf.AddTo(templates.TemplateFunctions)
+
+			err = tf.AddTo(templates.TemplateFunctions, secretStore)
+			if err != nil {
+				return err
+			}
 
 			l.Builders = append(l.Builders,
 				&BootstrapChannelBuilder{
-					cluster:      cluster,
 					Lifecycle:    &clusterLifecycle,
-					templates:    templates,
 					assetBuilder: assetBuilder,
+					cluster:      cluster,
+					templates:    templates,
 				},
-				&model.PKIModelBuilder{KopsModelContext: modelContext, Lifecycle: &clusterLifecycle},
+				&model.PKIModelBuilder{
+					KopsModelContext: modelContext,
+					Lifecycle:        &clusterLifecycle,
+				},
+				&etcdmanager.EtcdManagerBuilder{
+					AssetBuilder:     assetBuilder,
+					KopsModelContext: modelContext,
+					Lifecycle:        &clusterLifecycle,
+				},
 			)
 
 			switch kops.CloudProviderID(cluster.Spec.CloudProvider) {
@@ -525,8 +645,12 @@ func (c *ApplyClusterCmd) Run() error {
 					&model.IAMModelBuilder{KopsModelContext: modelContext, Lifecycle: &securityLifecycle},
 				)
 			case kops.CloudProviderDO:
+				doModelContext := &domodel.DOModelContext{
+					KopsModelContext: modelContext,
+				}
 				l.Builders = append(l.Builders,
 					&model.MasterVolumeBuilder{KopsModelContext: modelContext, Lifecycle: &clusterLifecycle},
+					&domodel.APILoadBalancerModelBuilder{DOModelContext: doModelContext, Lifecycle: &securityLifecycle},
 				)
 
 			case kops.CloudProviderGCE:
@@ -549,11 +673,23 @@ func (c *ApplyClusterCmd) Run() error {
 					&gcemodel.NetworkModelBuilder{GCEModelContext: gceModelContext, Lifecycle: &networkLifecycle},
 				)
 
-				if featureflag.GoogleCloudBucketAcl.Enabled() {
-					l.Builders = append(l.Builders,
-						&gcemodel.StorageAclBuilder{GCEModelContext: gceModelContext, Cloud: cloud.(gce.GCECloud), Lifecycle: &storageAclLifecycle},
-					)
+				l.Builders = append(l.Builders,
+					&gcemodel.StorageAclBuilder{GCEModelContext: gceModelContext, Cloud: cloud.(gce.GCECloud), Lifecycle: &storageAclLifecycle},
+				)
+
+			case kops.CloudProviderALI:
+				aliModelContext := &alimodel.ALIModelContext{
+					KopsModelContext: modelContext,
 				}
+				l.Builders = append(l.Builders,
+					&model.MasterVolumeBuilder{KopsModelContext: modelContext, Lifecycle: &clusterLifecycle},
+					&alimodel.APILoadBalancerModelBuilder{ALIModelContext: aliModelContext, Lifecycle: &clusterLifecycle},
+					&alimodel.NetworkModelBuilder{ALIModelContext: aliModelContext, Lifecycle: &clusterLifecycle},
+					&alimodel.RAMModelBuilder{ALIModelContext: aliModelContext, Lifecycle: &clusterLifecycle},
+					&alimodel.SSHKeyModelBuilder{ALIModelContext: aliModelContext, Lifecycle: &clusterLifecycle},
+					&alimodel.FirewallModelBuilder{ALIModelContext: aliModelContext, Lifecycle: &clusterLifecycle},
+					&alimodel.ExternalAccessModelBuilder{ALIModelContext: aliModelContext, Lifecycle: &clusterLifecycle},
+				)
 
 			case kops.CloudProviderVSphere:
 				// No special settings (yet!)
@@ -567,7 +703,11 @@ func (c *ApplyClusterCmd) Run() error {
 				}
 
 				l.Builders = append(l.Builders,
+					&model.MasterVolumeBuilder{KopsModelContext: modelContext, Lifecycle: &clusterLifecycle},
+					// &openstackmodel.APILBModelBuilder{OpenstackModelContext: openstackModelContext, Lifecycle: &clusterLifecycle},
 					&openstackmodel.NetworkModelBuilder{OpenstackModelContext: openstackModelContext, Lifecycle: &networkLifecycle},
+					&openstackmodel.SSHKeyModelBuilder{OpenstackModelContext: openstackModelContext, Lifecycle: &securityLifecycle},
+					&openstackmodel.FirewallModelBuilder{OpenstackModelContext: openstackModelContext, Lifecycle: &securityLifecycle},
 				)
 
 			default:
@@ -599,13 +739,21 @@ func (c *ApplyClusterCmd) Run() error {
 			KopsModelContext: modelContext,
 		}
 
-		l.Builders = append(l.Builders, &awsmodel.AutoscalingGroupModelBuilder{
-			AWSModelContext: awsModelContext,
-			BootstrapScript: bootstrapScriptBuilder,
-			Lifecycle:       &clusterLifecycle,
-
-			SecurityLifecycle: &securityLifecycle,
-		})
+		if featureflag.Spotinst.Enabled() {
+			l.Builders = append(l.Builders, &spotinstmodel.InstanceGroupModelBuilder{
+				AWSModelContext:   awsModelContext,
+				BootstrapScript:   bootstrapScriptBuilder,
+				Lifecycle:         &clusterLifecycle,
+				SecurityLifecycle: &securityLifecycle,
+			})
+		} else {
+			l.Builders = append(l.Builders, &awsmodel.AutoscalingGroupModelBuilder{
+				AWSModelContext:   awsModelContext,
+				BootstrapScript:   bootstrapScriptBuilder,
+				Lifecycle:         &clusterLifecycle,
+				SecurityLifecycle: &securityLifecycle,
+			})
+		}
 	case kops.CloudProviderDO:
 		doModelContext := &domodel.DOModelContext{
 			KopsModelContext: modelContext,
@@ -628,6 +776,20 @@ func (c *ApplyClusterCmd) Run() error {
 				Lifecycle:       &clusterLifecycle,
 			})
 		}
+
+	case kops.CloudProviderALI:
+		{
+			aliModelContext := &alimodel.ALIModelContext{
+				KopsModelContext: modelContext,
+			}
+
+			l.Builders = append(l.Builders, &alimodel.ScalingGroupModelBuilder{
+				ALIModelContext: aliModelContext,
+				BootstrapScript: bootstrapScriptBuilder,
+				Lifecycle:       &clusterLifecycle,
+			})
+		}
+
 	case kops.CloudProviderVSphere:
 		{
 			vsphereModelContext := &vspheremodel.VSphereModelContext{
@@ -645,6 +807,15 @@ func (c *ApplyClusterCmd) Run() error {
 		// BareMetal tasks will go here
 
 	case kops.CloudProviderOpenstack:
+		openstackModelContext := &openstackmodel.OpenstackModelContext{
+			KopsModelContext: modelContext,
+		}
+
+		l.Builders = append(l.Builders, &openstackmodel.ServerGroupModelBuilder{
+			OpenstackModelContext: openstackModelContext,
+			BootstrapScript:       bootstrapScriptBuilder,
+			Lifecycle:             &clusterLifecycle,
+		})
 
 	default:
 		return fmt.Errorf("unknown cloudprovider %q", cluster.Spec.CloudProvider)
@@ -652,7 +823,10 @@ func (c *ApplyClusterCmd) Run() error {
 
 	l.TemplateFunctions["Masters"] = tf.modelContext.MasterInstanceGroups
 
-	tf.AddTo(l.TemplateFunctions)
+	err = tf.AddTo(l.TemplateFunctions, secretStore)
+	if err != nil {
+		return err
+	}
 
 	taskMap, err := l.BuildTasks(modelStore, fileModels, assetBuilder, &stageAssetsLifecycle, c.LifecycleOverrides)
 	if err != nil {
@@ -680,6 +854,8 @@ func (c *ApplyClusterCmd) Run() error {
 			target = baremetal.NewTarget(cloud.(*baremetal.Cloud))
 		case kops.CloudProviderOpenstack:
 			target = openstack.NewOpenstackAPITarget(cloud.(openstack.OpenstackCloud))
+		case kops.CloudProviderALI:
+			target = aliup.NewALIAPITarget(cloud.(aliup.ALICloud))
 		default:
 			return fmt.Errorf("direct configuration not supported with CloudProvider:%q", cluster.Spec.CloudProvider)
 		}
@@ -687,7 +863,11 @@ func (c *ApplyClusterCmd) Run() error {
 	case TargetTerraform:
 		checkExisting = false
 		outDir := c.OutDir
-		tf := terraform.NewTerraformTarget(cloud, region, project, outDir, cluster.Spec.Target)
+		tfVersion := terraform.Version011
+		if featureflag.Terraform012.Enabled() {
+			tfVersion = terraform.Version012
+		}
+		tf := terraform.NewTerraformTarget(cloud, region, project, outDir, tfVersion, cluster.Spec.Target)
 
 		// We include a few "util" variables in the TF output
 		if err := tf.AddOutputVariable("region", terraform.LiteralFromStringValue(region)); err != nil {
@@ -739,7 +919,7 @@ func (c *ApplyClusterCmd) Run() error {
 
 		for _, g := range c.InstanceGroups {
 			// TODO: We need to update the mirror (below), but do we need to update the primary?
-			_, err := c.Clientset.InstanceGroupsFor(c.Cluster).Update(g)
+			_, err := c.Clientset.InstanceGroupsFor(c.Cluster).Update(ctx, g, metav1.UpdateOptions{})
 			if err != nil {
 				return fmt.Errorf("error writing InstanceGroup %q to registry: %v", g.ObjectMeta.Name, err)
 			}
@@ -757,7 +937,14 @@ func (c *ApplyClusterCmd) Run() error {
 	}
 	defer context.Close()
 
-	err = context.RunTasks(c.MaxTaskDuration)
+	var options fi.RunTasksOptions
+	if c.RunTasksOptions != nil {
+		options = *c.RunTasksOptions
+	} else {
+		options.InitDefaults()
+	}
+
+	err = context.RunTasks(options)
 	if err != nil {
 		return fmt.Errorf("error running tasks: %v", err)
 	}
@@ -768,7 +955,7 @@ func (c *ApplyClusterCmd) Run() error {
 
 	if shouldPrecreateDNS {
 		if err := precreateDNS(cluster, cloud); err != nil {
-			glog.Warningf("unable to pre-create DNS records - cluster startup may be slower: %v", err)
+			klog.Warningf("unable to pre-create DNS records - cluster startup may be slower: %v", err)
 		}
 	}
 
@@ -803,53 +990,53 @@ func (c *ApplyClusterCmd) upgradeSpecs(assetBuilder *assets.AssetBuilder) error 
 func (c *ApplyClusterCmd) validateKopsVersion() error {
 	kopsVersion, err := semver.ParseTolerant(kopsbase.Version)
 	if err != nil {
-		glog.Warningf("unable to parse kops version %q", kopsbase.Version)
+		klog.Warningf("unable to parse kops version %q", kopsbase.Version)
 		// Not a hard-error
 		return nil
 	}
 
 	versionInfo := kops.FindKopsVersionSpec(c.channel.Spec.KopsVersions, kopsVersion)
 	if versionInfo == nil {
-		glog.Warningf("unable to find version information for kops version %q in channel", kopsVersion)
+		klog.Warningf("unable to find version information for kops version %q in channel", kopsVersion)
 		// Not a hard-error
 		return nil
 	}
 
 	recommended, err := versionInfo.FindRecommendedUpgrade(kopsVersion)
 	if err != nil {
-		glog.Warningf("unable to parse version recommendation for kops version %q in channel", kopsVersion)
+		klog.Warningf("unable to parse version recommendation for kops version %q in channel", kopsVersion)
 	}
 
 	required, err := versionInfo.IsUpgradeRequired(kopsVersion)
 	if err != nil {
-		glog.Warningf("unable to parse version requirement for kops version %q in channel", kopsVersion)
+		klog.Warningf("unable to parse version requirement for kops version %q in channel", kopsVersion)
 	}
 
 	if recommended != nil && !required {
 		fmt.Printf("\n")
-		fmt.Printf(starline)
+		fmt.Printf("%s\n", starline)
 		fmt.Printf("\n")
-		fmt.Printf("A new kops version is available: %s\n", recommended)
+		fmt.Printf("A new kops version is available: %s", recommended)
 		fmt.Printf("\n")
 		fmt.Printf("Upgrading is recommended\n")
 		fmt.Printf("More information: %s\n", buildPermalink("upgrade_kops", recommended.String()))
 		fmt.Printf("\n")
-		fmt.Printf(starline)
+		fmt.Printf("%s\n", starline)
 		fmt.Printf("\n")
 	} else if required {
 		fmt.Printf("\n")
-		fmt.Printf(starline)
+		fmt.Printf("%s\n", starline)
 		fmt.Printf("\n")
 		if recommended != nil {
-			fmt.Printf("A new kops version is available: %s\n", recommended)
+			fmt.Printf("a new kops version is available: %s\n", recommended)
 		}
-		fmt.Printf("\n")
+		fmt.Println("")
 		fmt.Printf("This version of kops (%s) is no longer supported; upgrading is required\n", kopsbase.Version)
 		fmt.Printf("(you can bypass this check by exporting KOPS_RUN_OBSOLETE_VERSION)\n")
-		fmt.Printf("\n")
+		fmt.Println("")
 		fmt.Printf("More information: %s\n", buildPermalink("upgrade_kops", recommended.String()))
 		fmt.Printf("\n")
-		fmt.Printf(starline)
+		fmt.Printf("%s\n", starline)
 		fmt.Printf("\n")
 	}
 
@@ -866,9 +1053,55 @@ func (c *ApplyClusterCmd) validateKopsVersion() error {
 func (c *ApplyClusterCmd) validateKubernetesVersion() error {
 	parsed, err := util.ParseKubernetesVersion(c.Cluster.Spec.KubernetesVersion)
 	if err != nil {
-		glog.Warningf("unable to parse kubernetes version %q", c.Cluster.Spec.KubernetesVersion)
+		klog.Warningf("unable to parse kubernetes version %q", c.Cluster.Spec.KubernetesVersion)
 		// Not a hard-error
 		return nil
+	}
+
+	kopsVersion, err := semver.Parse(kopsbase.KOPS_RELEASE_VERSION)
+	if err != nil {
+		klog.Warningf("unable to parse kops version %q", kopsVersion)
+	} else {
+		tooNewVersion := kopsVersion
+		tooNewVersion.Minor += 1
+		tooNewVersion.Pre = nil
+		tooNewVersion.Build = nil
+		if util.IsKubernetesGTE(tooNewVersion.String(), *parsed) {
+			fmt.Printf("\n")
+			fmt.Printf("%s\n", starline)
+			fmt.Printf("\n")
+			fmt.Printf("This version of kubernetes is not yet supported; upgrading kops is required\n")
+			fmt.Printf("(you can bypass this check by exporting KOPS_RUN_TOO_NEW_VERSION)\n")
+			fmt.Printf("\n")
+			fmt.Printf("%s\n", starline)
+			fmt.Printf("\n")
+			if os.Getenv("KOPS_RUN_TOO_NEW_VERSION") == "" {
+				return fmt.Errorf("kops upgrade is required")
+			}
+		}
+	}
+
+	if !util.IsKubernetesGTE(OldestSupportedKubernetesVersion, *parsed) {
+		fmt.Printf("This version of Kubernetes is no longer supported; upgrading Kubernetes is required\n")
+		fmt.Printf("\n")
+		fmt.Printf("More information: %s\n", buildPermalink("upgrade_k8s", OldestRecommendedKubernetesVersion))
+		fmt.Printf("\n")
+		fmt.Printf("%s\n", starline)
+		fmt.Printf("\n")
+		return fmt.Errorf("kubernetes upgrade is required")
+	}
+	if !util.IsKubernetesGTE(OldestRecommendedKubernetesVersion, *parsed) {
+		fmt.Printf("\n")
+		fmt.Printf("%s\n", starline)
+		fmt.Printf("\n")
+		fmt.Printf("Kops support for this Kubernetes version is deprecated and will be removed in a future release.\n")
+		fmt.Printf("\n")
+		fmt.Printf("Upgrading Kubernetes is recommended\n")
+		fmt.Printf("More information: %s\n", buildPermalink("upgrade_k8s", OldestRecommendedKubernetesVersion))
+		fmt.Printf("\n")
+		fmt.Printf("%s\n", starline)
+		fmt.Printf("\n")
+
 	}
 
 	// TODO: make util.ParseKubernetesVersion not return a pointer
@@ -876,35 +1109,35 @@ func (c *ApplyClusterCmd) validateKubernetesVersion() error {
 
 	versionInfo := kops.FindKubernetesVersionSpec(c.channel.Spec.KubernetesVersions, kubernetesVersion)
 	if versionInfo == nil {
-		glog.Warningf("unable to find version information for kubernetes version %q in channel", kubernetesVersion)
+		klog.Warningf("unable to find version information for kubernetes version %q in channel", kubernetesVersion)
 		// Not a hard-error
 		return nil
 	}
 
 	recommended, err := versionInfo.FindRecommendedUpgrade(kubernetesVersion)
 	if err != nil {
-		glog.Warningf("unable to parse version recommendation for kubernetes version %q in channel", kubernetesVersion)
+		klog.Warningf("unable to parse version recommendation for kubernetes version %q in channel", kubernetesVersion)
 	}
 
 	required, err := versionInfo.IsUpgradeRequired(kubernetesVersion)
 	if err != nil {
-		glog.Warningf("unable to parse version requirement for kubernetes version %q in channel", kubernetesVersion)
+		klog.Warningf("unable to parse version requirement for kubernetes version %q in channel", kubernetesVersion)
 	}
 
 	if recommended != nil && !required {
 		fmt.Printf("\n")
-		fmt.Printf(starline)
+		fmt.Printf("%s\n", starline)
 		fmt.Printf("\n")
 		fmt.Printf("A new kubernetes version is available: %s\n", recommended)
 		fmt.Printf("Upgrading is recommended (try kops upgrade cluster)\n")
 		fmt.Printf("\n")
 		fmt.Printf("More information: %s\n", buildPermalink("upgrade_k8s", recommended.String()))
 		fmt.Printf("\n")
-		fmt.Printf(starline)
+		fmt.Printf("%s\n", starline)
 		fmt.Printf("\n")
 	} else if required {
 		fmt.Printf("\n")
-		fmt.Printf(starline)
+		fmt.Printf("%s\n", starline)
 		fmt.Printf("\n")
 		if recommended != nil {
 			fmt.Printf("A new kubernetes version is available: %s\n", recommended)
@@ -915,7 +1148,7 @@ func (c *ApplyClusterCmd) validateKubernetesVersion() error {
 		fmt.Printf("\n")
 		fmt.Printf("More information: %s\n", buildPermalink("upgrade_k8s", recommended.String()))
 		fmt.Printf("\n")
-		fmt.Printf(starline)
+		fmt.Printf("%s\n", starline)
 		fmt.Printf("\n")
 	}
 
@@ -944,16 +1177,7 @@ func (c *ApplyClusterCmd) AddFileAssets(assetBuilder *assets.AssetBuilder) error
 		"/bin/linux/amd64/kubectl",
 	}
 	if needsMounterAsset(c.Cluster, c.InstanceGroups) {
-		k8sVersion, err := util.ParseKubernetesVersion(c.Cluster.Spec.KubernetesVersion)
-		if err != nil {
-			return fmt.Errorf("unable to determine kubernetes version from %q", c.Cluster.Spec.KubernetesVersion)
-		} else if util.IsKubernetesGTE("1.9", *k8sVersion) {
-			// Available directly
-			k8sAssetsNames = append(k8sAssetsNames, "/bin/linux/amd64/mounter")
-		} else {
-			// Only available in the kubernetes-manifests.tar.gz directory
-			k8sAssetsNames = append(k8sAssetsNames, "/kubernetes-manifests.tar.gz")
-		}
+		k8sAssetsNames = append(k8sAssetsNames, "/bin/linux/amd64/mounter")
 	}
 
 	for _, a := range k8sAssetsNames {
@@ -967,36 +1191,60 @@ func (c *ApplyClusterCmd) AddFileAssets(assetBuilder *assets.AssetBuilder) error
 		if err != nil {
 			return err
 		}
-		c.Assets = append(c.Assets, hash.Hex()+"@"+u.String())
+		c.Assets = append(c.Assets, BuildMirroredAsset(u, hash))
 	}
 
 	if usesCNI(c.Cluster) {
-		cniAsset, cniAssetHashString, err := findCNIAssets(c.Cluster, assetBuilder)
+		cniAsset, cniAssetHash, err := findCNIAssets(c.Cluster, assetBuilder)
 		if err != nil {
 			return err
 		}
 
-		c.Assets = append(c.Assets, cniAssetHashString+"@"+cniAsset.String())
+		c.Assets = append(c.Assets, BuildMirroredAsset(cniAsset, cniAssetHash))
+	}
+
+	if c.Cluster.Spec.Networking.LyftVPC != nil {
+		var hash *hashing.Hash
+
+		urlString := os.Getenv("LYFT_VPC_DOWNLOAD_URL")
+		if urlString == "" {
+			urlString = "https://github.com/lyft/cni-ipvlan-vpc-k8s/releases/download/v0.6.0/cni-ipvlan-vpc-k8s-amd64-v0.6.0.tar.gz"
+			hash, err = hashing.FromString("871757d381035f64020a523e7a3e139b6177b98eb7a61b547813ff25957fc566")
+			if err != nil {
+				// Should be impossible
+				return fmt.Errorf("invalid hard-coded hash for lyft url")
+			}
+		} else {
+			klog.Warningf("Using url from LYFT_VPC_DOWNLOAD_URL env var: %q", urlString)
+		}
+
+		u, err := url.Parse(urlString)
+		if err != nil {
+			return fmt.Errorf("unable to parse lyft-vpc URL %q", urlString)
+		}
+
+		c.Assets = append(c.Assets, BuildMirroredAsset(u, hash))
 	}
 
 	// TODO figure out if we can only do this for CoreOS only and GCE Container OS
 	// TODO It is very difficult to pre-determine what OS an ami is, and if that OS needs socat
-	// At this time we just copy the socat binary to all distros.  Most distros will be there own
-	// socat binary.  Container operating systems like CoreOS need to have socat added to them.
+	// At this time we just copy the socat and conntrack binaries to all distros.
+	// Most distros will have their own socat and conntrack binary.
+	// Container operating systems like CoreOS need to have socat and conntrack added to them.
 	{
 		utilsLocation, hash, err := KopsFileUrl("linux/amd64/utils.tar.gz", assetBuilder)
 		if err != nil {
 			return err
 		}
-		c.Assets = append(c.Assets, hash.Hex()+"@"+utilsLocation.String())
+		c.Assets = append(c.Assets, BuildMirroredAsset(utilsLocation, hash))
 	}
 
-	n, hash, err := NodeUpLocation(assetBuilder)
+	asset, err := NodeUpAsset(assetBuilder)
 	if err != nil {
 		return err
 	}
-	c.NodeUpSource = n.String()
-	c.NodeUpHash = hash.Hex()
+	c.NodeUpSource = strings.Join(asset.Locations, ",")
+	c.NodeUpHash = asset.Hash.Hex()
 
 	// Explicitly add the protokube image,
 	// otherwise when the Target is DryRun this asset is not added
@@ -1076,21 +1324,24 @@ func (c *ApplyClusterCmd) BuildNodeUpConfig(assetBuilder *assets.AssetBuilder, i
 	}
 
 	config := &nodeup.Config{}
-	for _, tag := range nodeUpTags.List() {
-		config.Tags = append(config.Tags, tag)
-	}
+	config.Tags = append(config.Tags, nodeUpTags.List()...)
 
-	config.Assets = c.Assets
+	for _, a := range c.Assets {
+		config.Assets = append(config.Assets, a.CompactString())
+	}
 	config.ClusterName = cluster.ObjectMeta.Name
 	config.ConfigBase = fi.String(configBase.Path())
 	config.InstanceGroupName = ig.ObjectMeta.Name
+
+	useGossip := dns.IsGossipHostname(cluster.Spec.MasterInternalName)
+	isMaster := role == kops.InstanceGroupRoleMaster
 
 	var images []*nodeup.Image
 
 	if components.IsBaseURL(cluster.Spec.KubernetesVersion) {
 		// When using a custom version, we want to preload the images over http
 		components := []string{"kube-proxy"}
-		if role == kops.InstanceGroupRoleMaster {
+		if isMaster {
 			components = append(components, "kube-apiserver", "kube-controller-manager", "kube-scheduler")
 		}
 
@@ -1108,23 +1359,58 @@ func (c *ApplyClusterCmd) BuildNodeUpConfig(assetBuilder *assets.AssetBuilder, i
 			}
 
 			image := &nodeup.Image{
-				Source: u.String(),
-				Hash:   hash.Hex(),
+				Sources: []string{u.String()},
+				Hash:    hash.Hex(),
 			}
 			images = append(images, image)
 		}
 	}
 
-	{
-		location, hash, err := ProtokubeImageSource(assetBuilder)
+	// `docker load` our images when using a KOPS_BASE_URL, so we
+	// don't need to push/pull from a registry
+	if os.Getenv("KOPS_BASE_URL") != "" && isMaster {
+		for _, name := range []string{"kops-controller", "dns-controller"} {
+			baseURL, err := url.Parse(os.Getenv("KOPS_BASE_URL"))
+			if err != nil {
+				return nil, err
+			}
+
+			baseURL.Path = path.Join(baseURL.Path, "/images/"+name+".tar.gz")
+
+			u, hash, err := assetBuilder.RemapFileAndSHA(baseURL)
+			if err != nil {
+				return nil, err
+			}
+
+			image := &nodeup.Image{
+				Sources: []string{u.String()},
+				Hash:    hash.Hex(),
+			}
+			images = append(images, image)
+		}
+	}
+
+	if isMaster || useGossip {
+		u, hash, err := ProtokubeImageSource(assetBuilder)
 		if err != nil {
 			return nil, err
 		}
 
+		asset := BuildMirroredAsset(u, hash)
+
 		config.ProtokubeImage = &nodeup.Image{
-			Name:   kopsbase.DefaultProtokubeImageName(),
-			Source: location.String(),
-			Hash:   hash.Hex(),
+			Name:    kopsbase.DefaultProtokubeImageName(),
+			Sources: asset.Locations,
+			Hash:    asset.Hash.Hex(),
+		}
+	}
+
+	if role == kops.InstanceGroupRoleMaster {
+		for _, etcdCluster := range cluster.Spec.EtcdClusters {
+			if etcdCluster.Provider == kops.EtcdProviderTypeManager {
+				p := configBase.Join("manifests/etcd/" + etcdCluster.Name + ".yaml").Path()
+				config.EtcdManifests = append(config.EtcdManifests, p)
+			}
 		}
 	}
 

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
@@ -57,7 +57,7 @@ func (e *SecurityGroupRule) Find(c *fi.Context) (*SecurityGroupRule, error) {
 	}
 
 	if e.SourceGroup != nil && e.SourceGroup.ID == nil {
-		glog.V(4).Infof("Skipping find of SecurityGroupRule %s, because SourceGroup was not found", fi.StringValue(e.Name))
+		klog.V(4).Infof("Skipping find of SecurityGroupRule %s, because SourceGroup was not found", fi.StringValue(e.Name))
 		return nil, nil
 	}
 
@@ -77,10 +77,10 @@ func (e *SecurityGroupRule) Find(c *fi.Context) (*SecurityGroupRule, error) {
 	}
 
 	if len(response.SecurityGroups) != 1 {
-		glog.Fatalf("found multiple security groups for id=%s", *e.SecurityGroup.ID)
+		klog.Fatalf("found multiple security groups for id=%s", *e.SecurityGroup.ID)
 	}
 	sg := response.SecurityGroups[0]
-	//glog.V(2).Info("found existing security group")
+	//klog.V(2).Info("found existing security group")
 
 	var foundRule *ec2.IpPermission
 
@@ -164,7 +164,7 @@ func (e *SecurityGroupRule) matches(rule *ec2.IpPermission) bool {
 			}
 
 			if e.SourceGroup.ID == nil {
-				glog.Warningf("SourceGroup had nil ID: %v", e.SourceGroup)
+				klog.Warningf("SourceGroup had nil ID: %v", e.SourceGroup)
 				continue
 			}
 
@@ -264,7 +264,7 @@ func (_ *SecurityGroupRule) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Secu
 			}
 			request.IpPermissions = []*ec2.IpPermission{ipPermission}
 
-			glog.V(2).Infof("%s: Calling EC2 AuthorizeSecurityGroupEgress (%s)", name, description)
+			klog.V(2).Infof("%s: Calling EC2 AuthorizeSecurityGroupEgress (%s)", name, description)
 			_, err := t.Cloud.EC2().AuthorizeSecurityGroupEgress(request)
 			if err != nil {
 				return fmt.Errorf("error creating SecurityGroupEgress: %v", err)
@@ -275,7 +275,7 @@ func (_ *SecurityGroupRule) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Secu
 			}
 			request.IpPermissions = []*ec2.IpPermission{ipPermission}
 
-			glog.V(2).Infof("%s: Calling EC2 AuthorizeSecurityGroupIngress (%s)", name, description)
+			klog.V(2).Infof("%s: Calling EC2 AuthorizeSecurityGroupIngress (%s)", name, description)
 			_, err := t.Cloud.EC2().AuthorizeSecurityGroupIngress(request)
 			if err != nil {
 				return fmt.Errorf("error creating SecurityGroupIngress: %v", err)
@@ -290,16 +290,16 @@ func (_ *SecurityGroupRule) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Secu
 }
 
 type terraformSecurityGroupIngress struct {
-	Type *string `json:"type"`
+	Type *string `json:"type" cty:"type"`
 
-	SecurityGroup *terraform.Literal `json:"security_group_id"`
-	SourceGroup   *terraform.Literal `json:"source_security_group_id,omitempty"`
+	SecurityGroup *terraform.Literal `json:"security_group_id" cty:"security_group_id"`
+	SourceGroup   *terraform.Literal `json:"source_security_group_id,omitempty" cty:"source_security_group_id"`
 
-	FromPort *int64 `json:"from_port,omitempty"`
-	ToPort   *int64 `json:"to_port,omitempty"`
+	FromPort *int64 `json:"from_port,omitempty" cty:"from_port"`
+	ToPort   *int64 `json:"to_port,omitempty" cty:"to_port"`
 
-	Protocol   *string  `json:"protocol,omitempty"`
-	CIDRBlocks []string `json:"cidr_blocks,omitempty"`
+	Protocol   *string  `json:"protocol,omitempty" cty:"protocol"`
+	CIDRBlocks []string `json:"cidr_blocks,omitempty" cty:"cidr_blocks"`
 }
 
 func (_ *SecurityGroupRule) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *SecurityGroupRule) error {

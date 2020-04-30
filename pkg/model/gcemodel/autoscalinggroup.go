@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,9 +17,15 @@ limitations under the License.
 package gcemodel
 
 import (
+	"fmt"
+	"strings"
+
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/model"
 	"k8s.io/kops/pkg/model/defaults"
+	"k8s.io/kops/pkg/model/iam"
+	nodeidentitygce "k8s.io/kops/pkg/nodeidentity/gce"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gcetasks"
@@ -29,6 +35,7 @@ const (
 	DefaultVolumeType = "pd-standard"
 )
 
+// TODO: rework these parts to be more GCE native. ie: Managed Instance Groups > ASGs
 // AutoscalingGroupModelBuilder configures AutoscalingGroup objects
 type AutoscalingGroupModelBuilder struct {
 	*GCEModelContext
@@ -64,7 +71,6 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 			}
 
 			namePrefix := gce.LimitedLengthName(name, gcetasks.InstanceTemplateNamePrefixMaxLength)
-
 			t := &gcetasks.InstanceTemplate{
 				Name:           s(name),
 				NamePrefix:     s(namePrefix),
@@ -75,8 +81,6 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 				BootDiskSizeGB: i64(int64(volumeSize)),
 				BootDiskImage:  s(ig.Spec.Image),
 
-				CanIPForward: fi.Bool(true),
-
 				// TODO: Support preemptible nodes?
 				Preemptible: fi.Bool(false),
 
@@ -84,19 +88,39 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 					"compute-rw",
 					"monitoring",
 					"logging-write",
-					"storage-ro",
 				},
-
 				Metadata: map[string]*fi.ResourceHolder{
 					"startup-script": startupScript,
 					//"config": resources/config.yaml $nodeset.Name
 					"cluster-name": fi.WrapResource(fi.NewStringResource(b.ClusterName())),
+					nodeidentitygce.MetadataKeyInstanceGroupName: fi.WrapResource(fi.NewStringResource(ig.Name)),
 				},
+			}
+
+			storagePaths, err := iam.WriteableVFSPaths(b.Cluster, ig.Spec.Role)
+			if err != nil {
+				return err
+			}
+			if len(storagePaths) == 0 {
+				t.Scopes = append(t.Scopes, "storage-ro")
+			} else {
+				klog.Warningf("enabling storage-rw for etcd backups")
+				t.Scopes = append(t.Scopes, "storage-rw")
+			}
+
+			if len(b.SSHPublicKeys) > 0 {
+				var gFmtKeys []string
+				for _, key := range b.SSHPublicKeys {
+					gFmtKeys = append(gFmtKeys, fmt.Sprintf("%s: %s", fi.SecretNameSSHPrimary, key))
+				}
+
+				t.Metadata["ssh-keys"] = fi.WrapResource(fi.NewStringResource(strings.Join(gFmtKeys, "\n")))
 			}
 
 			switch ig.Spec.Role {
 			case kops.InstanceGroupRoleMaster:
 				// Grant DNS permissions
+				// TODO: migrate to IAM permissions instead of oldschool scopes?
 				t.Scopes = append(t.Scopes, "https://www.googleapis.com/auth/ndev.clouddns.readwrite")
 				t.Tags = append(t.Tags, b.GCETagForRole(kops.InstanceGroupRoleMaster))
 
@@ -104,6 +128,28 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 				t.Tags = append(t.Tags, b.GCETagForRole(kops.InstanceGroupRoleNode))
 			}
 
+			if gce.UsesIPAliases(b.Cluster) {
+				t.CanIPForward = fi.Bool(false)
+
+				t.AliasIPRanges = map[string]string{
+					b.NameForIPAliasRange("pods"): "/24",
+				}
+				t.Subnet = b.LinkToIPAliasSubnet()
+			} else {
+				t.CanIPForward = fi.Bool(true)
+			}
+
+			if b.Cluster.Spec.GCEServiceAccount != "" {
+				klog.Infof("VMs using Service Account: %v", b.Cluster.Spec.GCEServiceAccount)
+				// b.Cluster.Spec.GCEServiceAccount = c.GCEServiceAccount
+			} else {
+				klog.Warning("VMs will be configured to use the GCE default compute Service Account! This is an anti-pattern")
+				klog.Warning("Use a pre-created Service Account with the flag: --gce-service-account=account@projectname.iam.gserviceaccount.com")
+				b.Cluster.Spec.GCEServiceAccount = "default"
+			}
+
+			klog.Infof("gsa: %v", b.Cluster.Spec.GCEServiceAccount)
+			t.ServiceAccounts = []string{b.Cluster.Spec.GCEServiceAccount}
 			//labels, err := b.CloudTagsForInstanceGroup(ig)
 			//if err != nil {
 			//	return fmt.Errorf("error building cloud tags: %v", err)
@@ -135,7 +181,7 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		// 1) no support in terraform
 		// 2) we can't steer to specific zones AFAICT, only to all zones in the region
 
-		targetSizes := make([]int, len(zones), len(zones))
+		targetSizes := make([]int, len(zones))
 		totalSize := 0
 		for i := range zones {
 			targetSizes[i] = minSize / len(zones)

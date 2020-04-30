@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +17,9 @@ limitations under the License.
 package components
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/loader"
 )
 
@@ -28,6 +30,7 @@ type KubeDnsOptionsBuilder struct {
 
 var _ loader.OptionsBuilder = &KubeDnsOptionsBuilder{}
 
+// BuildOptions fills in the kubedns model
 func (b *KubeDnsOptionsBuilder) BuildOptions(o interface{}) error {
 	clusterSpec := o.(*kops.ClusterSpec)
 
@@ -45,12 +48,40 @@ func (b *KubeDnsOptionsBuilder) BuildOptions(o interface{}) error {
 		clusterSpec.KubeDNS.CacheMaxConcurrent = 150
 	}
 
-	ip, err := WellKnownServiceIP(clusterSpec, 10)
-	if err != nil {
-		return err
+	if clusterSpec.KubeDNS.ServerIP == "" {
+		ip, err := WellKnownServiceIP(clusterSpec, 10)
+		if err != nil {
+			return err
+		}
+		clusterSpec.KubeDNS.ServerIP = ip.String()
 	}
-	clusterSpec.KubeDNS.ServerIP = ip.String()
-	clusterSpec.KubeDNS.Domain = clusterSpec.ClusterDNSDomain
+
+	if clusterSpec.KubeDNS.Domain == "" {
+		clusterSpec.KubeDNS.Domain = clusterSpec.ClusterDNSDomain
+	}
+
+	if clusterSpec.KubeDNS.MemoryRequest == nil || clusterSpec.KubeDNS.MemoryRequest.IsZero() {
+		defaultMemoryRequest := resource.MustParse("70Mi")
+		clusterSpec.KubeDNS.MemoryRequest = &defaultMemoryRequest
+	}
+
+	if clusterSpec.KubeDNS.CPURequest == nil || clusterSpec.KubeDNS.CPURequest.IsZero() {
+		defaultCPURequest := resource.MustParse("100m")
+		clusterSpec.KubeDNS.CPURequest = &defaultCPURequest
+	}
+
+	if clusterSpec.KubeDNS.MemoryLimit == nil || clusterSpec.KubeDNS.MemoryLimit.IsZero() {
+		defaultMemoryLimit := resource.MustParse("170Mi")
+		clusterSpec.KubeDNS.MemoryLimit = &defaultMemoryLimit
+	}
+
+	NodeLocalDNS := clusterSpec.KubeDNS.NodeLocalDNS
+	if NodeLocalDNS == nil {
+		NodeLocalDNS = &kops.NodeLocalDNSConfig{}
+		NodeLocalDNS.Enabled = fi.Bool(false)
+	} else if fi.BoolValue(NodeLocalDNS.Enabled) && NodeLocalDNS.LocalIP == "" {
+		NodeLocalDNS.LocalIP = "169.254.20.10"
+	}
 
 	return nil
 }

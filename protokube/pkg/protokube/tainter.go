@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,15 +17,15 @@ limitations under the License.
 package protokube
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 type nodePatch struct {
@@ -35,6 +35,7 @@ type nodePatch struct {
 
 type nodePatchMetadata struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
 }
 
 type nodePatchSpec struct {
@@ -49,7 +50,7 @@ const TaintsAnnotationKey string = "scheduler.alpha.kubernetes.io/taints"
 // applyMasterTaints finds masters that have not yet been tainted, and applies the master taint.
 // Once all supported kubelet versions accept the --register-with-taints flag introduced in 1.6.0, this can probably
 // go away entirely. It also sets the unschedulable flag to false, so pods (with a toleration) can target the node
-func applyMasterTaints(kubeContext *KubernetesContext) error {
+func applyMasterTaints(ctx context.Context, kubeContext *KubernetesContext) error {
 	client, err := kubeContext.KubernetesClient()
 	if err != nil {
 		return err
@@ -58,8 +59,8 @@ func applyMasterTaints(kubeContext *KubernetesContext) error {
 	options := metav1.ListOptions{
 		LabelSelector: labels.SelectorFromSet(labels.Set{"kubernetes.io/role": "master"}).String(),
 	}
-	glog.V(2).Infof("Querying k8s for nodes with selector %q", options.LabelSelector)
-	nodes, err := client.CoreV1().Nodes().List(options)
+	klog.V(2).Infof("Querying k8s for nodes with selector %q", options.LabelSelector)
+	nodes, err := client.CoreV1().Nodes().List(ctx, options)
 	if err != nil {
 		return fmt.Errorf("error querying nodes: %v", err)
 	}
@@ -76,7 +77,7 @@ func applyMasterTaints(kubeContext *KubernetesContext) error {
 		nodeTaintJSON := node.Annotations[TaintsAnnotationKey]
 		if nodeTaintJSON != "" {
 			if nodeTaintJSON != string(taintJSON) {
-				glog.Infof("Node %q is registered with taint: %v", node.Name, nodeTaintJSON)
+				klog.Infof("Node %q is registered with taint: %v", node.Name, nodeTaintJSON)
 			}
 			continue
 		}
@@ -97,9 +98,9 @@ func applyMasterTaints(kubeContext *KubernetesContext) error {
 			return fmt.Errorf("error building node patch: %v", err)
 		}
 
-		glog.V(2).Infof("sending patch for node %q: %q", node.Name, string(nodePatchJson))
+		klog.V(2).Infof("sending patch for node %q: %q", node.Name, string(nodePatchJson))
 
-		_, err = client.CoreV1().Nodes().Patch(node.Name, types.StrategicMergePatchType, nodePatchJson)
+		_, err = client.CoreV1().Nodes().Patch(ctx, node.Name, types.StrategicMergePatchType, nodePatchJson, metav1.PatchOptions{})
 		if err != nil {
 			// TODO: Should we keep going?
 			return fmt.Errorf("error applying patch to node: %v", err)

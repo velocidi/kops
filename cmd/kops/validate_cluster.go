@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,35 +17,34 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"strings"
+	"time"
+
+	"k8s.io/kops/upup/pkg/fi/cloudup"
 
 	"github.com/ghodss/yaml"
-	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog"
 	"k8s.io/kops/cmd/kops/util"
-	api "k8s.io/kops/pkg/apis/kops"
+	kopsapi "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/validation"
 	"k8s.io/kops/util/pkg/tables"
 )
 
-func init() {
-	if runtime.GOOS == "darwin" {
-		// In order for  net.LookupHost(apiAddr.Host) to lookup our placeholder address on darwin, we have to
-		os.Setenv("GODEBUG", "netdns=go")
-	}
-}
-
 type ValidateClusterOptions struct {
-	output string
+	output     string
+	wait       time.Duration
+	count      int
+	kubeconfig string
 }
 
 func (o *ValidateClusterOptions) InitDefaults() {
@@ -62,9 +61,11 @@ func NewCmdValidateCluster(f *util.Factory, out io.Writer) *cobra.Command {
 		Long:    validateLong,
 		Example: validateExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			result, err := RunValidateCluster(f, cmd, args, os.Stdout, options)
+			ctx := context.TODO()
+
+			result, err := RunValidateCluster(ctx, f, cmd, args, os.Stdout, options)
 			if err != nil {
-				exitWithError(err)
+				exitWithError(fmt.Errorf("Validation failed: %v", err))
 			}
 			// We want the validate command to exit non-zero if validation found a problem,
 			// even if we didn't really hit an error during validation.
@@ -75,17 +76,25 @@ func NewCmdValidateCluster(f *util.Factory, out io.Writer) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&options.output, "output", "o", options.output, "Output format. One of json|yaml|table.")
+	cmd.Flags().DurationVar(&options.wait, "wait", options.wait, "If set, will wait for cluster to be ready")
+	cmd.Flags().IntVar(&options.count, "count", options.count, "If set, will validate the cluster consecutive times")
+	cmd.Flags().StringVar(&options.kubeconfig, "kubeconfig", "", "Path to the kubeconfig file")
 
 	return cmd
 }
 
-func RunValidateCluster(f *util.Factory, cmd *cobra.Command, args []string, out io.Writer, options *ValidateClusterOptions) (*validation.ValidationCluster, error) {
+func RunValidateCluster(ctx context.Context, f *util.Factory, cmd *cobra.Command, args []string, out io.Writer, options *ValidateClusterOptions) (*validation.ValidationCluster, error) {
 	err := rootCommand.ProcessArgs(args)
 	if err != nil {
 		return nil, err
 	}
 
-	cluster, err := rootCommand.Cluster()
+	cluster, err := rootCommand.Cluster(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	cloud, err := cloudup.BuildCloud(cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +104,7 @@ func RunValidateCluster(f *util.Factory, cmd *cobra.Command, args []string, out 
 		return nil, err
 	}
 
-	list, err := clientSet.InstanceGroupsFor(cluster).List(metav1.ListOptions{})
+	list, err := clientSet.InstanceGroupsFor(cluster).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("cannot get InstanceGroups for %q: %v", cluster.ObjectMeta.Name, err)
 	}
@@ -104,10 +113,10 @@ func RunValidateCluster(f *util.Factory, cmd *cobra.Command, args []string, out 
 		fmt.Fprintf(out, "Validating cluster %v\n\n", cluster.ObjectMeta.Name)
 	}
 
-	var instanceGroups []api.InstanceGroup
+	var instanceGroups []kopsapi.InstanceGroup
 	for _, ig := range list.Items {
 		instanceGroups = append(instanceGroups, ig)
-		glog.V(2).Infof("instance group: %#v\n\n", ig.Spec)
+		klog.V(2).Infof("instance group: %#v\n\n", ig.Spec)
 	}
 
 	if len(instanceGroups) == 0 {
@@ -116,78 +125,121 @@ func RunValidateCluster(f *util.Factory, cmd *cobra.Command, args []string, out 
 
 	// TODO: Refactor into util.Factory
 	contextName := cluster.ObjectMeta.Name
+	configLoadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if options.kubeconfig != "" {
+		configLoadingRules.ExplicitPath = options.kubeconfig
+	}
 	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		clientcmd.NewDefaultClientConfigLoadingRules(),
+		configLoadingRules,
 		&clientcmd.ConfigOverrides{CurrentContext: contextName}).ClientConfig()
 	if err != nil {
-		return nil, fmt.Errorf("Cannot load kubecfg settings for %q: %v", contextName, err)
+		return nil, fmt.Errorf("cannot load kubecfg settings for %q: %v", contextName, err)
 	}
 
 	k8sClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("Cannot build kubernetes api client for %q: %v", contextName, err)
+		return nil, fmt.Errorf("cannot build kubernetes api client for %q: %v", contextName, err)
 	}
 
-	result, err := validation.ValidateCluster(cluster, list, k8sClient)
+	timeout := time.Now().Add(options.wait)
+	pollInterval := 10 * time.Second
+
+	validator, err := validation.NewClusterValidator(cluster, cloud, list, k8sClient)
 	if err != nil {
-		return nil, fmt.Errorf("unexpected error during validation: %v", err)
+		return nil, fmt.Errorf("unexpected error creating validatior: %v", err)
 	}
 
-	switch options.output {
-	case OutputTable:
-		if err := validateClusterOutputTable(result, cluster, instanceGroups, out); err != nil {
-			return nil, err
+	consecutive := 0
+	for {
+		if options.wait > 0 && time.Now().After(timeout) {
+			return nil, fmt.Errorf("wait time exceeded during validation")
 		}
 
-	case OutputYaml:
-		y, err := yaml.Marshal(result)
+		result, err := validator.Validate()
 		if err != nil {
-			return nil, fmt.Errorf("unable to marshal YAML: %v", err)
-		}
-		if _, err := out.Write(y); err != nil {
-			return nil, fmt.Errorf("error writing to output: %v", err)
-		}
-
-	case OutputJSON:
-		j, err := json.Marshal(result)
-		if err != nil {
-			return nil, fmt.Errorf("unable to marshal JSON: %v", err)
-		}
-		if _, err := out.Write(j); err != nil {
-			return nil, fmt.Errorf("error writing to output: %v", err)
+			consecutive = 0
+			if options.wait > 0 {
+				klog.Warningf("(will retry): unexpected error during validation: %v", err)
+				time.Sleep(pollInterval)
+				continue
+			} else {
+				return nil, fmt.Errorf("unexpected error during validation: %v", err)
+			}
 		}
 
-	default:
-		return nil, fmt.Errorf("Unknown output format: %q", options.output)
+		switch options.output {
+		case OutputTable:
+			if err := validateClusterOutputTable(result, cluster, instanceGroups, out); err != nil {
+				return nil, err
+			}
+		case OutputYaml:
+			y, err := yaml.Marshal(result)
+			if err != nil {
+				return nil, fmt.Errorf("unable to marshal YAML: %v", err)
+			}
+			if _, err := out.Write(y); err != nil {
+				return nil, fmt.Errorf("error writing to output: %v", err)
+			}
+		case OutputJSON:
+			j, err := json.Marshal(result)
+			if err != nil {
+				return nil, fmt.Errorf("unable to marshal JSON: %v", err)
+			}
+			if _, err := out.Write(j); err != nil {
+				return nil, fmt.Errorf("error writing to output: %v", err)
+			}
+		default:
+			return nil, fmt.Errorf("unknown output format: %q", options.output)
+		}
+
+		if len(result.Failures) == 0 {
+			consecutive++
+			if consecutive < options.count {
+				klog.Infof("(will retry): cluster passed validation %d consecutive times", consecutive)
+				if options.wait > 0 {
+					time.Sleep(pollInterval)
+					continue
+				} else {
+					return nil, fmt.Errorf("cluster passed validation %d consecutive times", consecutive)
+				}
+			} else {
+				return result, nil
+			}
+		} else {
+			if options.wait > 0 && consecutive == 0 {
+				klog.Warningf("(will retry): cluster not yet healthy")
+				time.Sleep(pollInterval)
+				continue
+			} else {
+				return nil, fmt.Errorf("cluster not yet healthy")
+			}
+		}
 	}
-
-	return result, nil
 }
 
-func validateClusterOutputTable(result *validation.ValidationCluster, cluster *api.Cluster, instanceGroups []api.InstanceGroup, out io.Writer) error {
+func validateClusterOutputTable(result *validation.ValidationCluster, cluster *kopsapi.Cluster, instanceGroups []kopsapi.InstanceGroup, out io.Writer) error {
 	t := &tables.Table{}
-	t.AddColumn("NAME", func(c api.InstanceGroup) string {
+	t.AddColumn("NAME", func(c kopsapi.InstanceGroup) string {
 		return c.ObjectMeta.Name
 	})
-	t.AddColumn("ROLE", func(c api.InstanceGroup) string {
+	t.AddColumn("ROLE", func(c kopsapi.InstanceGroup) string {
 		return string(c.Spec.Role)
 	})
-	t.AddColumn("MACHINETYPE", func(c api.InstanceGroup) string {
+	t.AddColumn("MACHINETYPE", func(c kopsapi.InstanceGroup) string {
 		return c.Spec.MachineType
 	})
-	t.AddColumn("SUBNETS", func(c api.InstanceGroup) string {
+	t.AddColumn("SUBNETS", func(c kopsapi.InstanceGroup) string {
 		return strings.Join(c.Spec.Subnets, ",")
 	})
-	t.AddColumn("MIN", func(c api.InstanceGroup) string {
+	t.AddColumn("MIN", func(c kopsapi.InstanceGroup) string {
 		return int32PointerToString(c.Spec.MinSize)
 	})
-	t.AddColumn("MAX", func(c api.InstanceGroup) string {
+	t.AddColumn("MAX", func(c kopsapi.InstanceGroup) string {
 		return int32PointerToString(c.Spec.MaxSize)
 	})
 
 	fmt.Fprintln(out, "INSTANCE GROUPS")
 	err := t.Render(instanceGroups, out, "NAME", "ROLE", "MACHINETYPE", "MIN", "MAX", "SUBNETS")
-
 	if err != nil {
 		return fmt.Errorf("cannot render nodes for %q: %v", cluster.Name, err)
 	}
@@ -228,12 +280,10 @@ func validateClusterOutputTable(result *validation.ValidationCluster, cluster *a
 		if err := failuresTable.Render(result.Failures, out, "KIND", "NAME", "MESSAGE"); err != nil {
 			return fmt.Errorf("error rendering failures table: %v", err)
 		}
-	}
 
-	if len(result.Failures) == 0 {
-		fmt.Fprintf(out, "\nYour cluster %s is ready\n", cluster.Name)
+		fmt.Fprintf(out, "\nValidation Failed\n")
 	} else {
-		fmt.Fprint(out, "\nValidation Failed\n")
+		fmt.Fprintf(out, "\nYour cluster %s is ready\n", cluster.Name)
 	}
 
 	return nil

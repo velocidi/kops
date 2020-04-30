@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ func (b *KubeProxyOptionsBuilder) BuildOptions(o interface{}) error {
 		config.CPURequest = "100m"
 	}
 
-	image, err := Image("kube-proxy", clusterSpec, b.Context.AssetBuilder)
+	image, err := Image("kube-proxy", b.Context.Architecture(), clusterSpec, b.Context.AssetBuilder)
 	if err != nil {
 		return err
 	}
@@ -60,7 +60,14 @@ func (b *KubeProxyOptionsBuilder) BuildOptions(o interface{}) error {
 	// * dns-controller talks to the API using the kube-proxy configured kubernetes service
 
 	if config.ClusterCIDR == "" {
-		if clusterSpec.KubeControllerManager != nil {
+		// If we're using the AmazonVPC networking, we should omit the ClusterCIDR
+		// because pod IPs are real, routable IPs in the VPC, and they are not in a specific
+		// CIDR range that allows us to distinguish them from other IPs.  Omitting the ClusterCIDR
+		// causes kube-proxy never to SNAT when proxying clusterIPs, which is the behavior
+		// we want for pods.
+		// If we're not using the AmazonVPC networking, and the KubeControllerMananger has
+		// a ClusterCIDR, use that because most networking plug ins draw pod IPs from this range.
+		if clusterSpec.Networking.AmazonVPC == nil && clusterSpec.KubeControllerManager != nil {
 			config.ClusterCIDR = clusterSpec.KubeControllerManager.ClusterCIDR
 		}
 	}
@@ -69,7 +76,22 @@ func (b *KubeProxyOptionsBuilder) BuildOptions(o interface{}) error {
 	cloudProvider := kops.CloudProviderID(clusterSpec.CloudProvider)
 	if cloudProvider == kops.CloudProviderAWS {
 		// Use the hostname from the AWS metadata service
-		config.HostnameOverride = "@aws"
+		// if hostnameOverride is not set.
+		if config.HostnameOverride == "" {
+			config.HostnameOverride = "@aws"
+		}
+	}
+
+	if cloudProvider == kops.CloudProviderDO {
+		if config.HostnameOverride == "" {
+			config.HostnameOverride = "@digitalocean"
+		}
+	}
+
+	if cloudProvider == kops.CloudProviderALI {
+		if config.HostnameOverride == "" {
+			config.HostnameOverride = "@alicloud"
+		}
 	}
 
 	return nil

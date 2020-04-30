@@ -17,24 +17,24 @@ limitations under the License.
 package main
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/homedir"
+	"k8s.io/klog"
 	"k8s.io/kops/cmd/kops/util"
 	"k8s.io/kops/pkg/bundle"
 	"k8s.io/kops/upup/pkg/kutil"
 	"k8s.io/kops/util/pkg/vfs"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 )
 
 var (
@@ -67,7 +67,8 @@ func NewCmdToolboxBundle(f *util.Factory, out io.Writer) *cobra.Command {
 		Long:    toolboxBundleLong,
 		Example: toolboxBundleExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := RunToolboxBundle(f, out, options, args)
+			ctx := context.TODO()
+			err := RunToolboxBundle(ctx, f, out, options, args)
 			if err != nil {
 				exitWithError(err)
 			}
@@ -79,12 +80,12 @@ func NewCmdToolboxBundle(f *util.Factory, out io.Writer) *cobra.Command {
 	return cmd
 }
 
-func RunToolboxBundle(context Factory, out io.Writer, options *ToolboxBundleOptions, args []string) error {
+func RunToolboxBundle(ctx context.Context, f Factory, out io.Writer, options *ToolboxBundleOptions, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("Specify name of instance group for node")
+		return fmt.Errorf("specify name of instance group for node")
 	}
 	if len(args) != 1 {
-		return fmt.Errorf("Can only specify one instance group")
+		return fmt.Errorf("can only specify one instance group")
 	}
 
 	if options.Target == "" {
@@ -92,17 +93,17 @@ func RunToolboxBundle(context Factory, out io.Writer, options *ToolboxBundleOpti
 	}
 	groupName := args[0]
 
-	cluster, err := rootCommand.Cluster()
+	cluster, err := rootCommand.Cluster(ctx)
 	if err != nil {
 		return err
 	}
 
-	clientset, err := context.Clientset()
+	clientset, err := f.Clientset()
 	if err != nil {
 		return err
 	}
 
-	ig, err := clientset.InstanceGroupsFor(cluster).Get(groupName, metav1.GetOptions{})
+	ig, err := clientset.InstanceGroupsFor(cluster).Get(ctx, groupName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("error reading InstanceGroup %q: %v", groupName, err)
 	}
@@ -125,7 +126,7 @@ func RunToolboxBundle(context Factory, out io.Writer, options *ToolboxBundleOpti
 	}
 	nodeSSH.SSHConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey()
 	nodeSSH.SSHConfig.User = sshUser
-	sshIdentity := filepath.Join(os.Getenv("HOME"), ".ssh", "id_rsa")
+	sshIdentity := filepath.Join(homedir.HomeDir(), ".ssh", "id_rsa")
 	if err := kutil.AddSSHIdentity(&nodeSSH.SSHConfig, sshIdentity); err != nil {
 		return err
 	}
@@ -148,7 +149,7 @@ func RunToolboxBundle(context Factory, out io.Writer, options *ToolboxBundleOpti
 			Mode: file.Header.FileInfo().Mode(),
 		}
 		p := root.Join("etc", "kubernetes", "bootstrap", file.Header.Name)
-		glog.Infof("writing %s", p)
+		klog.Infof("writing %s", p)
 		if err := p.WriteFile(bytes.NewReader(file.Data), sshAcl); err != nil {
 			return fmt.Errorf("error writing file %q: %v", file.Header.Name, err)
 		}
@@ -173,38 +174,13 @@ func runSshCommand(sshClient *ssh.Client, cmd string) error {
 	s.Stdout = io.MultiWriter(&stdout, os.Stdout)
 	s.Stderr = io.MultiWriter(&stderr, os.Stderr)
 
-	glog.Infof("running %s", cmd)
+	klog.Infof("running %s", cmd)
 	if err := s.Run(cmd); err != nil {
 		return fmt.Errorf("error running %s: %v\nstdout: %s\nstderr: %s", cmd, err, stdout.String(), stderr.String())
 	}
 
-	glog.Infof("stdout: %s", stdout.String())
-	glog.Infof("stderr: %s", stderr.String())
-	return nil
-}
-
-func writeToTar(files []*bundle.DataFile, bundlePath string) error {
-	f, err := os.Create(bundlePath)
-	if err != nil {
-		return fmt.Errorf("error creating output bundle file %q: %v", bundlePath, err)
-	}
-	defer f.Close()
-
-	gw := gzip.NewWriter(f)
-	defer gw.Close()
-	tw := tar.NewWriter(gw)
-	defer tw.Close()
-
-	for _, file := range files {
-		if err := tw.WriteHeader(&file.Header); err != nil {
-			return fmt.Errorf("error writing tar file header: %v", err)
-		}
-
-		if _, err := tw.Write(file.Data); err != nil {
-			return fmt.Errorf("error writing tar file data: %v", err)
-		}
-	}
-
+	klog.Infof("stdout: %s", stdout.String())
+	klog.Infof("stderr: %s", stderr.String())
 	return nil
 }
 

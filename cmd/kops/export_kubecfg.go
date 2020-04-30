@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,15 +17,19 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"fmt"
 	"io"
 
 	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kops/cmd/kops/util"
+	kopsapi "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/commands"
 	"k8s.io/kops/pkg/kubeconfig"
-	"k8s.io/kops/upup/pkg/fi"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 )
 
 var (
@@ -44,8 +48,8 @@ var (
 )
 
 type ExportKubecfgOptions struct {
-	tmpdir   string
-	keyStore fi.CAStore
+	KubeConfigPath string
+	all            bool
 }
 
 func NewCmdExportKubecfg(f *util.Factory, out io.Writer) *cobra.Command {
@@ -57,46 +61,82 @@ func NewCmdExportKubecfg(f *util.Factory, out io.Writer) *cobra.Command {
 		Long:    exportKubecfgLong,
 		Example: exportKubecfgExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := RunExportKubecfg(f, out, options, args)
+			ctx := context.TODO()
+			err := RunExportKubecfg(ctx, f, out, options, args)
 			if err != nil {
 				exitWithError(err)
 			}
 		},
 	}
 
+	cmd.Flags().StringVar(&options.KubeConfigPath, "kubeconfig", options.KubeConfigPath, "The location of the kubeconfig file to create.")
+	cmd.Flags().BoolVar(&options.all, "all", options.all, "export all clusters from the kops state store")
+
 	return cmd
 }
 
-func RunExportKubecfg(f *util.Factory, out io.Writer, options *ExportKubecfgOptions, args []string) error {
-	err := rootCommand.ProcessArgs(args)
-	if err != nil {
-		return err
-	}
-
+func RunExportKubecfg(ctx context.Context, f *util.Factory, out io.Writer, options *ExportKubecfgOptions, args []string) error {
 	clientset, err := rootCommand.Clientset()
 	if err != nil {
 		return err
 	}
 
-	cluster, err := rootCommand.Cluster()
-	if err != nil {
-		return err
+	var clusterList []*kopsapi.Cluster
+	if options.all {
+		if len(args) != 0 {
+			return fmt.Errorf("Cannot use both --all flag and positional arguments")
+		}
+		list, err := clientset.ListClusters(ctx, metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		for i := range list.Items {
+			clusterList = append(clusterList, &list.Items[i])
+		}
+	} else {
+		err := rootCommand.ProcessArgs(args)
+		if err != nil {
+			return err
+		}
+		cluster, err := rootCommand.Cluster(ctx)
+		if err != nil {
+			return err
+		}
+		clusterList = append(clusterList, cluster)
 	}
 
-	keyStore, err := clientset.KeyStore(cluster)
-	if err != nil {
-		return err
+	for _, cluster := range clusterList {
+		keyStore, err := clientset.KeyStore(cluster)
+		if err != nil {
+			return err
+		}
+
+		secretStore, err := clientset.SecretStore(cluster)
+		if err != nil {
+			return err
+		}
+
+		conf, err := kubeconfig.BuildKubecfg(cluster, keyStore, secretStore, &commands.CloudDiscoveryStatusStore{}, buildPathOptions(options))
+		if err != nil {
+			return err
+		}
+
+		if err := conf.WriteKubecfg(); err != nil {
+			return err
+		}
 	}
 
-	secretStore, err := clientset.SecretStore(cluster)
-	if err != nil {
-		return err
+	return nil
+}
+
+func buildPathOptions(options *ExportKubecfgOptions) *clientcmd.PathOptions {
+	pathOptions := clientcmd.NewDefaultPathOptions()
+
+	if len(options.KubeConfigPath) > 0 {
+		pathOptions.GlobalFile = options.KubeConfigPath
+		pathOptions.EnvVar = ""
+		pathOptions.GlobalFileSubpath = ""
 	}
 
-	conf, err := kubeconfig.BuildKubecfg(cluster, keyStore, secretStore, &commands.CloudDiscoveryStatusStore{})
-	if err != nil {
-		return err
-	}
-
-	return conf.WriteKubecfg()
+	return pathOptions
 }

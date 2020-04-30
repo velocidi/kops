@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,9 +23,8 @@ import (
 	"os"
 	"reflect"
 	"strings"
-	"time"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/dnsprovider/pkg/dnsprovider"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/util/pkg/vfs"
@@ -80,19 +79,20 @@ func (c *Context) AllTasks() map[string]Task {
 	return c.tasks
 }
 
-func (c *Context) RunTasks(maxTaskDuration time.Duration) error {
+func (c *Context) RunTasks(options RunTasksOptions) error {
 	e := &executor{
 		context: c,
+		options: options,
 	}
-	return e.RunTasks(c.tasks, maxTaskDuration)
+	return e.RunTasks(c.tasks)
 }
 
 func (c *Context) Close() {
-	glog.V(2).Infof("deleting temp dir: %q", c.Tmpdir)
+	klog.V(2).Infof("deleting temp dir: %q", c.Tmpdir)
 	if c.Tmpdir != "" {
 		err := os.RemoveAll(c.Tmpdir)
 		if err != nil {
-			glog.Warningf("unable to delete temporary directory %q: %v", c.Tmpdir, err)
+			klog.Warningf("unable to delete temporary directory %q: %v", c.Tmpdir, err)
 		}
 	}
 }
@@ -125,7 +125,7 @@ func (c *Context) Render(a, e, changes Task) error {
 
 			switch *lifecycle {
 			case LifecycleExistsAndValidates:
-				return fmt.Errorf("Lifecycle set to ExistsAndValidates, but object was not found")
+				return fmt.Errorf("lifecycle set to ExistsAndValidates, but object was not found")
 			case LifecycleExistsAndWarnIfChanges:
 				return NewExistsAndWarnIfChangesError("Lifecycle set to ExistsAndWarnIfChanges and object was not found.")
 			}
@@ -158,7 +158,7 @@ func (c *Context) Render(a, e, changes Task) error {
 				b.WriteTo(out)
 
 				if *lifecycle == LifecycleExistsAndValidates {
-					return fmt.Errorf("Lifecycle set to ExistsAndValidates, but object did not match")
+					return fmt.Errorf("lifecycle set to ExistsAndValidates, but object did not match")
 				} else {
 					// Warn, but then we continue
 					return nil
@@ -205,7 +205,7 @@ func (c *Context) Render(a, e, changes Task) error {
 		}
 		if match {
 			if renderer != nil {
-				return fmt.Errorf("Found multiple Render methods that could be invokved on %T", e)
+				return fmt.Errorf("found multiple Render methods that could be involved on %T", e)
 			}
 			renderer = &method
 			rendererArgs = args
@@ -213,12 +213,12 @@ func (c *Context) Render(a, e, changes Task) error {
 
 	}
 	if renderer == nil {
-		return fmt.Errorf("Could not find Render method on type %T (target %T)", e, c.Target)
+		return fmt.Errorf("could not find Render method on type %T (target %T)", e, c.Target)
 	}
 	rendererArgs = append(rendererArgs, reflect.ValueOf(a))
 	rendererArgs = append(rendererArgs, reflect.ValueOf(e))
 	rendererArgs = append(rendererArgs, reflect.ValueOf(changes))
-	glog.V(11).Infof("Calling method %s on %T", renderer.Name, e)
+	klog.V(11).Infof("Calling method %s on %T", renderer.Name, e)
 	m := v.MethodByName(renderer.Name)
 	rv := m.Call(rendererArgs)
 	var rvErr error
@@ -238,7 +238,7 @@ func (c *Context) AddWarning(task Task, message string) {
 	// We don't actually do anything with these warnings yet, other than log them to glog below.
 	// In future we might produce a structured warning report.
 	c.warnings = append(c.warnings, warning)
-	glog.Warningf("warning during task %s: %s", task, message)
+	klog.Warningf("warning during task %s: %s", task, message)
 }
 
 // ExistsAndWarnIfChangesError is the custom error return for fi.LifecycleExistsAndWarnIfChanges.

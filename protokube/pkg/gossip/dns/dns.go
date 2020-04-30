@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/protokube/pkg/gossip"
 )
 
@@ -44,17 +44,17 @@ func RunDNSUpdates(target DNSTarget, src *DNSView) {
 		// Snapshot is very cheap if we are in-sync
 		snapshot := src.Snapshot()
 		if lastSnapshot != nil && lastSnapshot.version == snapshot.version {
-			glog.V(4).Infof("DNSView unchanged: %v", lastSnapshot.version)
+			klog.V(4).Infof("DNSView unchanged: %v", lastSnapshot.version)
 			continue
 		}
 
 		// TODO: We might want to keep old records alive for a bit
 
-		glog.V(2).Infof("DNSView changed: %v", snapshot.version)
+		klog.V(2).Infof("DNSView changed: %v", snapshot.version)
 
 		err := target.Update(snapshot)
 		if err != nil {
-			glog.Warningf("error applying DNS changes to target: %v", err)
+			klog.Warningf("error applying DNS changes to target: %v", err)
 			continue
 		}
 
@@ -128,9 +128,24 @@ func (v *DNSView) RemoveZone(info DNSZoneInfo) error {
 	return fmt.Errorf("zone deletion is implicit")
 }
 
-// AddZone adds the specified zone, though this is currently not supported and returns an error.
+// AddZone adds the specified zone; this creates a fake NS record just so that the zone has records
 func (v *DNSView) AddZone(info DNSZoneInfo) (*DNSZoneInfo, error) {
-	return nil, fmt.Errorf("zone creation is implicit")
+	createRecords := []*DNSRecord{
+		{
+			RrsType: "NS",
+			Name:    info.Name,
+			Rrdatas: []string{"gossip"},
+		},
+	}
+
+	err := v.ApplyChangeset(info, nil, createRecords)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DNSZoneInfo{
+		Name: info.Name,
+	}, nil
 }
 
 // ApplyChangeset applies a DNS changeset to the records.
@@ -210,7 +225,7 @@ func (v *DNSView) Snapshot() *DNSViewSnapshot {
 		if strings.HasPrefix(k, "dns/") {
 			tokens := strings.Split(k, "/")
 			if len(tokens) != 4 {
-				glog.Warningf("key had invalid format: %q", k)
+				klog.Warningf("key had invalid format: %q", k)
 				continue
 			}
 
@@ -239,7 +254,7 @@ func (v *DNSView) Snapshot() *DNSViewSnapshot {
 			record.Rrdatas = append(record.Rrdatas, addresses...)
 			zone.Records[key] = record
 		} else {
-			glog.Warningf("unknown tag %q=%q", k, v)
+			klog.Warningf("unknown tag %q=%q", k, v)
 		}
 	}
 

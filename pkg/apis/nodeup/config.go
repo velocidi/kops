@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,14 +37,17 @@ type Config struct {
 	ProtokubeImage *Image `json:"protokubeImage,omitempty"`
 	// Channels is a list of channels that we should apply
 	Channels []string `json:"channels,omitempty"`
+
+	// Manifests for running etcd
+	EtcdManifests []string `json:"etcdManifests,omitempty"`
 }
 
 // Image is a docker image we should pre-load
 type Image struct {
 	// This is the name we would pass to "docker run", whereas source could be a URL from which we would download an image.
 	Name string `json:"name,omitempty"`
-	// Source is the URL from which we should download the image
-	Source string `json:"source,omitempty"`
+	// Sources is a list of URLs from which we should download the image
+	Sources []string `json:"sources,omitempty"`
 	// Hash is the hash of the file, to verify image integrity (even over http)
 	Hash string `json:"hash,omitempty"`
 }

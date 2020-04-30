@@ -19,7 +19,9 @@ package validation
 import (
 	"testing"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/kops/upup/pkg/fi"
+
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kops/pkg/apis/kops"
 )
 
@@ -69,6 +71,68 @@ func TestValidateInstanceGroupSpec(t *testing.T) {
 				MachineType: "t2.invalidType",
 			},
 			ExpectedErrors: []string{"Invalid value::test-nodes.spec.machineType"},
+		},
+		{
+			Input: kops.InstanceGroupSpec{
+				MachineType: "m5.large",
+				Image:       "k8s-1.9-debian-stretch-amd64-hvm-ebs-2018-03-11",
+			},
+			ExpectedErrors: []string{},
+		},
+		{
+			Input: kops.InstanceGroupSpec{
+				MachineType: "m5.large",
+				Image:       "k8s-1.9-debian-jessie-amd64-hvm-ebs-2018-03-11",
+			},
+			ExpectedErrors: []string{
+				"Forbidden::test-nodes.spec.machineType",
+			},
+		},
+		{
+			Input: kops.InstanceGroupSpec{
+				MachineType: "c5.large",
+				Image:       "k8s-1.9-debian-stretch-amd64-hvm-ebs-2018-03-11",
+			},
+			ExpectedErrors: []string{},
+		},
+		{
+			Input: kops.InstanceGroupSpec{
+				MachineType: "c5.large",
+				Image:       "k8s-1.9-debian-jessie-amd64-hvm-ebs-2018-03-11",
+			},
+			ExpectedErrors: []string{
+				"Forbidden::test-nodes.spec.machineType",
+			},
+		},
+		{
+			Input: kops.InstanceGroupSpec{
+				SpotDurationInMinutes: fi.Int64(55),
+			},
+			ExpectedErrors: []string{
+				"Unsupported value::test-nodes.spec.spotDurationInMinutes",
+			},
+		},
+		{
+			Input: kops.InstanceGroupSpec{
+				SpotDurationInMinutes: fi.Int64(380),
+			},
+			ExpectedErrors: []string{
+				"Unsupported value::test-nodes.spec.spotDurationInMinutes",
+			},
+		},
+		{
+			Input: kops.InstanceGroupSpec{
+				SpotDurationInMinutes: fi.Int64(125),
+			},
+			ExpectedErrors: []string{
+				"Unsupported value::test-nodes.spec.spotDurationInMinutes",
+			},
+		},
+		{
+			Input: kops.InstanceGroupSpec{
+				SpotDurationInMinutes: fi.Int64(120),
+			},
+			ExpectedErrors: []string{},
 		},
 	}
 	for _, g := range grid {

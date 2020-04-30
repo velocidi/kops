@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,10 +23,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang/glog"
-	compute "google.golang.org/api/compute/v0.beta"
+	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog"
 )
 
 const (
@@ -102,24 +102,24 @@ func waitForOp(op *compute.Operation, getOperation func(operationName string) (*
 	return wait.Poll(operationPollInterval, operationPollTimeoutDuration, func() (bool, error) {
 		start := time.Now()
 		//gce.operationPollRateLimiter.Accept()
-		duration := time.Now().Sub(start)
+		duration := time.Since(start)
 		if duration > 5*time.Second {
-			glog.Infof("pollOperation: throttled %v for %v", duration, opName)
+			klog.Infof("pollOperation: throttled %v for %v", duration, opName)
 		}
 		pollOp, err := getOperation(opName)
 		if err != nil {
-			glog.Warningf("GCE poll operation %s failed: pollOp: [%v] err: [%v] getErrorFromOp: [%v]", opName, pollOp, err, getErrorFromOp(pollOp))
+			klog.Warningf("GCE poll operation %s failed: pollOp: [%v] err: [%v] getErrorFromOp: [%v]", opName, pollOp, err, getErrorFromOp(pollOp))
 		}
 		done := opIsDone(pollOp)
 		if done {
-			duration := time.Now().Sub(opStart)
+			duration := time.Since(opStart)
 			if duration > 1*time.Minute {
 				// Log the JSON. It's cleaner than the %v structure.
 				enc, err := pollOp.MarshalJSON()
 				if err != nil {
-					glog.Warningf("waitForOperation: long operation (%v): %v (failed to encode to JSON: %v)", duration, pollOp, err)
+					klog.Warningf("waitForOperation: long operation (%v): %v (failed to encode to JSON: %v)", duration, pollOp, err)
 				} else {
-					glog.Infof("waitForOperation: long operation (%v): %v", duration, string(enc))
+					klog.Infof("waitForOperation: long operation (%v): %v", duration, string(enc))
 				}
 			}
 		}
@@ -133,7 +133,7 @@ func getErrorFromOp(op *compute.Operation) error {
 			Code:    int(op.HttpErrorStatusCode),
 			Message: op.Error.Errors[0].Message,
 		}
-		glog.Errorf("GCE operation failed: %v", err)
+		klog.Errorf("GCE operation failed: %v", err)
 		return err
 	}
 

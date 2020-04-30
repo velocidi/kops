@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,15 +19,13 @@ package kopscodecs
 import (
 	"bytes"
 	"fmt"
-	"os"
+	"regexp"
 
-	"github.com/golang/glog"
-	"k8s.io/apimachinery/pkg/apimachinery/announced"
-	"k8s.io/apimachinery/pkg/apimachinery/registered"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/install"
 	"k8s.io/kops/pkg/apis/kops/v1alpha2"
@@ -37,18 +35,15 @@ var Scheme = runtime.NewScheme()
 var Codecs = serializer.NewCodecFactory(Scheme)
 var ParameterCodec = runtime.NewParameterCodec(Scheme)
 
-var Registry = registered.NewOrDie(os.Getenv("KUBE_API_VERSIONS"))
-var GroupFactoryRegistry = make(announced.APIGroupFactoryRegistry)
-
 func init() {
 	metav1.AddToGroupVersion(Scheme, schema.GroupVersion{Version: "v1"})
-	install.Install(GroupFactoryRegistry, Registry, Scheme)
+	install.Install(Scheme)
 }
 
 func encoder(gv runtime.GroupVersioner, mediaType string) runtime.Encoder {
 	e, ok := runtime.SerializerInfoForMediaType(Codecs.SupportedMediaTypes(), mediaType)
 	if !ok {
-		glog.Fatalf("no %s serializer registered", mediaType)
+		klog.Fatalf("no %s serializer registered", mediaType)
 	}
 	return Codecs.EncoderForVersion(e.Serializer, gv)
 }
@@ -90,6 +85,37 @@ func ToVersionedJSONWithVersion(obj runtime.Object, version runtime.GroupVersion
 	return w.Bytes(), nil
 }
 
-func ParseVersionedYaml(data []byte) (runtime.Object, *schema.GroupVersionKind, error) {
-	return decoder().Decode(data, nil, nil)
+// Decode decodes the specified data, with the specified default version
+func Decode(data []byte, defaultReadVersion *schema.GroupVersionKind) (runtime.Object, *schema.GroupVersionKind, error) {
+	data = rewriteAPIGroup(data)
+
+	decoder := decoder()
+
+	object, gvk, err := decoder.Decode(data, defaultReadVersion, nil)
+	return object, gvk, err
+}
+
+// rewriteAPIGroup rewrites the apiVersion from kops/v1alphaN -> kops.k8s.io/v1alphaN
+// This allows us to register as a normal CRD
+func rewriteAPIGroup(y []byte) []byte {
+	changed := false
+
+	lines := bytes.Split(y, []byte("\n"))
+	for i := range lines {
+		if !bytes.Contains(lines[i], []byte("apiVersion:")) {
+			continue
+		}
+
+		{
+			re := regexp.MustCompile("kops/v1alpha2")
+			lines[i] = re.ReplaceAllLiteral(lines[i], []byte("kops.k8s.io/v1alpha2"))
+			changed = true
+		}
+	}
+
+	if changed {
+		y = bytes.Join(lines, []byte("\n"))
+	}
+
+	return y
 }

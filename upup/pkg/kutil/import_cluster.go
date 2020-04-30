@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,15 +19,15 @@ package kutil
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/registry"
 	"k8s.io/kops/pkg/client/simple"
@@ -46,7 +46,7 @@ type ImportCluster struct {
 	Clientset simple.Clientset
 }
 
-func (x *ImportCluster) ImportAWSCluster() error {
+func (x *ImportCluster) ImportAWSCluster(ctx context.Context) error {
 	awsCloud := x.Cloud.(awsup.AWSCloud)
 	clusterName := x.ClusterName
 
@@ -120,7 +120,7 @@ func (x *ImportCluster) ImportAWSCluster() error {
 			if masterInstance != nil {
 				masterState := aws.StringValue(masterInstance.State.Name)
 
-				glog.Infof("Found multiple masters: %s and %s", masterState, instanceState)
+				klog.Infof("Found multiple masters: %s and %s", masterState, instanceState)
 
 				if masterState == "terminated" && instanceState != "terminated" {
 					// OK
@@ -138,7 +138,7 @@ func (x *ImportCluster) ImportAWSCluster() error {
 		return fmt.Errorf("could not find master node")
 	}
 	masterInstanceID := aws.StringValue(masterInstance.InstanceId)
-	glog.Infof("Found master: %q", masterInstanceID)
+	klog.Infof("Found master: %q", masterInstanceID)
 
 	masterGroup := &kops.InstanceGroup{}
 	masterGroup.Spec.Role = kops.InstanceGroupRoleMaster
@@ -167,7 +167,7 @@ func (x *ImportCluster) ImportAWSCluster() error {
 		}
 
 		if !found {
-			glog.Warningf("Ignoring subnet %q in which no instances were found", subnetID)
+			klog.Warningf("Ignoring subnet %q in which no instances were found", subnetID)
 		}
 	}
 
@@ -297,10 +297,10 @@ func (x *ImportCluster) ImportAWSCluster() error {
 		}
 
 		if len(groups) == 0 {
-			glog.Warningf("No Autoscaling group found")
+			klog.Warningf("No Autoscaling group found")
 		}
 		if len(groups) == 1 {
-			glog.Warningf("Multiple Autoscaling groups found")
+			klog.Warningf("Multiple Autoscaling groups found")
 		}
 		minSize := int32(0)
 		maxSize := int32(0)
@@ -324,7 +324,7 @@ func (x *ImportCluster) ImportAWSCluster() error {
 			}
 
 			if launchConfiguration == nil {
-				glog.Warningf("LaunchConfiguration %q not found; ignoring", name)
+				klog.Warningf("ignoring error launchConfiguration %q not found", name)
 				continue
 			}
 
@@ -348,13 +348,13 @@ func (x *ImportCluster) ImportAWSCluster() error {
 			nodeGroup.Spec.MachineType = ""
 		}
 	}
-	if conf.Version == "1.2" {
-		// If users went with defaults on some things, clear them out so they get the new defaults
-		//if clusterConfig.AdmissionControl == "NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,ResourceQuota" {
-		//	// More admission controllers in 1.2
-		//	clusterConfig.AdmissionControl = ""
-		//}
-	}
+	// if conf.Version == "1.2" {
+	// If users went with defaults on some things, clear them out so they get the new defaults
+	//if clusterConfig.AdmissionControl == "NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,ResourceQuota" {
+	//	// More admission controllers in 1.2
+	//	clusterConfig.AdmissionControl = ""
+	//}
+	// }
 
 	for _, etcdClusterName := range []string{"main", "events"} {
 		etcdCluster := &kops.EtcdClusterSpec{
@@ -488,7 +488,7 @@ func (x *ImportCluster) ImportAWSCluster() error {
 		fullInstanceGroups = append(fullInstanceGroups, full)
 	}
 
-	err = registry.CreateClusterConfig(x.Clientset, cluster, fullInstanceGroups)
+	err = registry.CreateClusterConfig(ctx, x.Clientset, cluster, fullInstanceGroups)
 	if err != nil {
 		return err
 	}
@@ -507,18 +507,18 @@ func (x *ImportCluster) ImportAWSCluster() error {
 	return nil
 }
 
-func parseInt(s string) (int, error) {
-	if s == "" {
-		return 0, nil
-	}
+// func parseInt(s string) (int, error) {
+// 	if s == "" {
+// 		return 0, nil
+// 	}
 
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return 0, err
-	}
+// 	n, err := strconv.ParseInt(s, 10, 64)
+// 	if err != nil {
+// 		return 0, err
+// 	}
 
-	return int(n), nil
-}
+// 	return int(n), nil
+// }
 
 //func writeConf(p string, k8s *cloudup.CloudConfig) error {
 //	jsonBytes, err := json.Marshal(k8s)
@@ -542,7 +542,7 @@ func parseInt(s string) (int, error) {
 //		if ok && s == "" {
 //			delete(m, k)
 //		}
-//		//glog.Infof("%v=%v", k, v)
+//		//klog.Infof("%v=%v", k, v)
 //	}
 //
 //	yaml, err := yaml.Marshal(confObj)
@@ -629,15 +629,13 @@ func findInstances(c awsup.AWSCloud) ([]*ec2.Instance, error) {
 		Filters: filters,
 	}
 
-	glog.V(2).Infof("Querying EC2 instances")
+	klog.V(2).Infof("Querying EC2 instances")
 
 	var instances []*ec2.Instance
 
 	err := c.EC2().DescribeInstancesPages(request, func(p *ec2.DescribeInstancesOutput, lastPage bool) bool {
 		for _, reservation := range p.Reservations {
-			for _, instance := range reservation.Instances {
-				instances = append(instances, instance)
-			}
+			instances = append(instances, reservation.Instances...)
 		}
 		return true
 	})
@@ -779,7 +777,7 @@ func ParseUserDataConfiguration(raw []byte) (*UserDataConfiguration, error) {
 			}
 
 			if k == "" {
-				glog.V(4).Infof("Unknown line: %s", line)
+				klog.V(4).Infof("Unknown line: %s", line)
 			}
 
 			if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
@@ -798,7 +796,7 @@ func ParseUserDataConfiguration(raw []byte) (*UserDataConfiguration, error) {
 			}
 
 			if k == "" {
-				glog.V(4).Infof("Unknown line: %s", line)
+				klog.V(4).Infof("Unknown line: %s", line)
 			}
 
 			if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
@@ -821,7 +819,7 @@ func UserDataToString(userData []byte) (string, error) {
 	var err error
 	if len(userData) > 2 && userData[0] == 31 && userData[1] == 139 {
 		// GZIP
-		glog.V(2).Infof("gzip data detected; will decompress")
+		klog.V(2).Infof("gzip data detected; will decompress")
 
 		userData, err = gunzipBytes(userData)
 		if err != nil {

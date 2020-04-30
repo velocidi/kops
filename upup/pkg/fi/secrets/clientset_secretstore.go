@@ -18,14 +18,15 @@ package secrets
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/acls"
 	"k8s.io/kops/pkg/apis/kops"
 	kopsinternalversion "k8s.io/kops/pkg/client/clientset_generated/clientset/typed/kops/internalversion"
@@ -57,7 +58,9 @@ func NewClientsetSecretStore(cluster *kops.Cluster, clientset kopsinternalversio
 }
 
 func (c *ClientsetSecretStore) MirrorTo(basedir vfs.Path) error {
-	list, err := c.clientset.Keysets(c.namespace).List(v1.ListOptions{})
+	ctx := context.TODO()
+
+	list, err := c.clientset.Keysets(c.namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("error listing keysets: %v", err)
 	}
@@ -100,7 +103,9 @@ func (c *ClientsetSecretStore) MirrorTo(basedir vfs.Path) error {
 
 // FindSecret implements fi.SecretStore::FindSecret
 func (c *ClientsetSecretStore) FindSecret(name string) (*fi.Secret, error) {
-	s, err := c.loadSecret(name)
+	ctx := context.TODO()
+
+	s, err := c.loadSecret(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +114,9 @@ func (c *ClientsetSecretStore) FindSecret(name string) (*fi.Secret, error) {
 
 // ListSecrets implements fi.SecretStore::ListSecrets
 func (c *ClientsetSecretStore) ListSecrets() ([]string, error) {
-	list, err := c.clientset.Keysets(c.namespace).List(v1.ListOptions{})
+	ctx := context.TODO()
+
+	list, err := c.clientset.Keysets(c.namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("error listing keysets: %v", err)
 	}
@@ -142,22 +149,23 @@ func (c *ClientsetSecretStore) Secret(name string) (*fi.Secret, error) {
 
 // DeleteSecret implements fi.SecretStore::DeleteSecret
 func (c *ClientsetSecretStore) DeleteSecret(name string) error {
+	ctx := context.TODO()
+
 	client := c.clientset.Keysets(c.namespace)
 
-	keyset, err := client.Get(name, v1.GetOptions{})
+	keyset, err := client.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil
-		} else {
-			return fmt.Errorf("error reading Keyset %q: %v", name, err)
 		}
+		return fmt.Errorf("error reading Keyset %q: %v", name, err)
 	}
 
 	if keyset.Spec.Type != kops.SecretTypeSecret {
 		return fmt.Errorf("mismatch on Keyset type on %q", name)
 	}
 
-	if err := client.Delete(name, &v1.DeleteOptions{}); err != nil {
+	if err := client.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
 		return fmt.Errorf("error deleting Keyset %q: %v", name, err)
 	}
 
@@ -166,6 +174,8 @@ func (c *ClientsetSecretStore) DeleteSecret(name string) error {
 
 // GetOrCreateSecret implements fi.SecretStore::GetOrCreateSecret
 func (c *ClientsetSecretStore) GetOrCreateSecret(name string, secret *fi.Secret) (*fi.Secret, bool, error) {
+	ctx := context.TODO()
+
 	for i := 0; i < 2; i++ {
 		s, err := c.FindSecret(name)
 		if err != nil {
@@ -176,10 +186,10 @@ func (c *ClientsetSecretStore) GetOrCreateSecret(name string, secret *fi.Secret)
 			return s, false, nil
 		}
 
-		_, err = c.createSecret(secret, name, false)
+		_, err = c.createSecret(ctx, secret, name, false)
 		if err != nil {
 			if errors.IsAlreadyExists(err) && i == 0 {
-				glog.Infof("Got already-exists error when writing secret; likely due to concurrent creation.  Will retry")
+				klog.Infof("Got already-exists error when writing secret; likely due to concurrent creation.  Will retry")
 				continue
 			} else {
 				return nil, false, err
@@ -192,9 +202,9 @@ func (c *ClientsetSecretStore) GetOrCreateSecret(name string, secret *fi.Secret)
 	}
 
 	// Make double-sure it round-trips
-	s, err := c.loadSecret(name)
+	s, err := c.loadSecret(ctx, name)
 	if err != nil {
-		glog.Fatalf("unable to load secret immmediately after creation %v: %v", name, err)
+		klog.Fatalf("unable to load secret immediately after creation %v: %v", name, err)
 		return nil, false, err
 	}
 	return s, true, nil
@@ -202,23 +212,25 @@ func (c *ClientsetSecretStore) GetOrCreateSecret(name string, secret *fi.Secret)
 
 // ReplaceSecret implements fi.SecretStore::ReplaceSecret
 func (c *ClientsetSecretStore) ReplaceSecret(name string, secret *fi.Secret) (*fi.Secret, error) {
-	_, err := c.createSecret(secret, name, true)
+	ctx := context.TODO()
+
+	_, err := c.createSecret(ctx, secret, name, true)
 	if err != nil {
 		return nil, fmt.Errorf("unable to write secret: %v", err)
 	}
 
 	// Confirm the secret exists
-	s, err := c.loadSecret(name)
+	s, err := c.loadSecret(ctx, name)
 	if err != nil {
-		return nil, fmt.Errorf("unable to load secret immmediately after creation: %v", err)
+		return nil, fmt.Errorf("unable to load secret immediately after creation: %v", err)
 	}
 	return s, nil
 }
 
 // loadSecret returns the named secret, if it exists, otherwise returns nil
-func (c *ClientsetSecretStore) loadSecret(name string) (*fi.Secret, error) {
+func (c *ClientsetSecretStore) loadSecret(ctx context.Context, name string) (*fi.Secret, error) {
 	name = NamePrefix + name
-	keyset, err := c.clientset.Keysets(c.namespace).Get(name, v1.GetOptions{})
+	keyset, err := c.clientset.Keysets(c.namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil, nil
@@ -242,7 +254,7 @@ func parseSecret(keyset *kops.Keyset) (*fi.Secret, error) {
 }
 
 // createSecret will create the Secret, overwriting an existing secret if replace is true
-func (c *ClientsetSecretStore) createSecret(s *fi.Secret, name string, replace bool) (*kops.Keyset, error) {
+func (c *ClientsetSecretStore) createSecret(ctx context.Context, s *fi.Secret, name string, replace bool) (*kops.Keyset, error) {
 	keyset := &kops.Keyset{}
 	keyset.Name = NamePrefix + name
 	keyset.Spec.Type = kops.SecretTypeSecret
@@ -256,7 +268,7 @@ func (c *ClientsetSecretStore) createSecret(s *fi.Secret, name string, replace b
 	})
 
 	if replace {
-		return c.clientset.Keysets(c.namespace).Update(keyset)
+		return c.clientset.Keysets(c.namespace).Update(ctx, keyset, metav1.UpdateOptions{})
 	}
-	return c.clientset.Keysets(c.namespace).Create(keyset)
+	return c.clientset.Keysets(c.namespace).Create(ctx, keyset, metav1.CreateOptions{})
 }

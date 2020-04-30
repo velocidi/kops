@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
@@ -37,7 +37,6 @@ type VPC struct {
 
 	ID                 *string
 	CIDR               *string
-	AdditionalCIDR     []string
 	EnableDNSHostnames *bool
 	EnableDNSSupport   *bool
 
@@ -83,13 +82,7 @@ func (e *VPC) Find(c *fi.Context) (*VPC, error) {
 		Tags: intersectTags(vpc.Tags, e.Tags),
 	}
 
-	for _, b := range vpc.CidrBlockAssociationSet {
-		if aws.StringValue(b.CidrBlock) != aws.StringValue(vpc.CidrBlock) {
-			actual.AdditionalCIDR = append(actual.AdditionalCIDR, aws.StringValue(b.CidrBlock))
-		}
-	}
-
-	glog.V(4).Infof("found matching VPC %v", actual)
+	klog.V(4).Infof("found matching VPC %v", actual)
 
 	if actual.ID != nil {
 		request := &ec2.DescribeVpcAttributeInput{VpcId: actual.ID, Attribute: aws.String(ec2.VpcAttributeNameEnableDnsSupport)}
@@ -150,7 +143,7 @@ func (_ *VPC) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *VPC) error {
 
 		if changes != nil && changes.EnableDNSSupport != nil {
 			if featureflag.VPCSkipEnableDNSSupport.Enabled() {
-				glog.Warningf("VPC did not have EnableDNSSupport=true, but ignoring because of VPCSkipEnableDNSSupport feature-flag")
+				klog.Warningf("VPC did not have EnableDNSSupport=true, but ignoring because of VPCSkipEnableDNSSupport feature-flag")
 			} else {
 				// TODO: We could easily just allow kops to fix this...
 				return fmt.Errorf("VPC with id %q was set to be shared, but did not have EnableDNSSupport=true.", fi.StringValue(e.ID))
@@ -159,7 +152,7 @@ func (_ *VPC) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *VPC) error {
 	}
 
 	if a == nil {
-		glog.V(2).Infof("Creating VPC with CIDR: %q", *e.CIDR)
+		klog.V(2).Infof("Creating VPC with CIDR: %q", *e.CIDR)
 
 		request := &ec2.CreateVpcInput{
 			CidrBlock: e.CIDR,
@@ -197,18 +190,14 @@ func (_ *VPC) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *VPC) error {
 		}
 	}
 
-	if len(changes.AdditionalCIDR) != 0 {
-		glog.Warningf("AdditionalCIDR changes on a VPC are not currently implemented")
-	}
-
 	return t.AddAWSTags(*e.ID, e.Tags)
 }
 
 type terraformVPC struct {
-	CIDR               *string           `json:"cidr_block,omitempty"`
-	EnableDNSHostnames *bool             `json:"enable_dns_hostnames,omitempty"`
-	EnableDNSSupport   *bool             `json:"enable_dns_support,omitempty"`
-	Tags               map[string]string `json:"tags,omitempty"`
+	CIDR               *string           `json:"cidr_block,omitempty" cty:"cidr_block"`
+	EnableDNSHostnames *bool             `json:"enable_dns_hostnames,omitempty" cty:"enable_dns_hostnames"`
+	EnableDNSSupport   *bool             `json:"enable_dns_support,omitempty" cty:"enable_dns_support"`
+	Tags               map[string]string `json:"tags,omitempty" cty:"tags"`
 }
 
 func (_ *VPC) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *VPC) error {
@@ -223,9 +212,9 @@ func (_ *VPC) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *VPC) 
 		return nil
 	}
 
-	if len(e.AdditionalCIDR) != 0 {
-		// https://github.com/terraform-providers/terraform-provider-aws/issues/3403
-		return fmt.Errorf("terraform does not support AdditionalCIDRs on VPCs")
+	if err := t.AddOutputVariable("vpc_cidr_block", terraform.LiteralProperty("aws_vpc", *e.Name, "cidr_block")); err != nil {
+		// TODO: Should we try to output vpc_cidr_block for shared vpcs?
+		return err
 	}
 
 	tf := &terraformVPC{
@@ -242,10 +231,10 @@ func (e *VPC) TerraformLink() *terraform.Literal {
 	shared := fi.BoolValue(e.Shared)
 	if shared {
 		if e.ID == nil {
-			glog.Fatalf("ID must be set, if VPC is shared: %s", e)
+			klog.Fatalf("ID must be set, if VPC is shared: %s", e)
 		}
 
-		glog.V(4).Infof("reusing existing VPC with id %q", *e.ID)
+		klog.V(4).Infof("reusing existing VPC with id %q", *e.ID)
 		return terraform.LiteralFromStringValue(*e.ID)
 	}
 
@@ -267,10 +256,6 @@ func (_ *VPC) RenderCloudformation(t *cloudformation.CloudformationTarget, a, e,
 		return nil
 	}
 
-	if len(changes.AdditionalCIDR) != 0 {
-		glog.Warningf("AdditionalCIDR changes on a VPC are not currently implemented")
-	}
-
 	tf := &cloudformationVPC{
 		CidrBlock:          e.CIDR,
 		EnableDnsHostnames: e.EnableDNSHostnames,
@@ -285,10 +270,10 @@ func (e *VPC) CloudformationLink() *cloudformation.Literal {
 	shared := fi.BoolValue(e.Shared)
 	if shared {
 		if e.ID == nil {
-			glog.Fatalf("ID must be set, if VPC is shared: %s", e)
+			klog.Fatalf("ID must be set, if VPC is shared: %s", e)
 		}
 
-		glog.V(4).Infof("reusing existing VPC with id %q", *e.ID)
+		klog.V(4).Infof("reusing existing VPC with id %q", *e.ID)
 		return cloudformation.LiteralString(*e.ID)
 	}
 

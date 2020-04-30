@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	"github.com/blang/semver"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/channels/pkg/api"
 	"k8s.io/kops/upup/pkg/fi/utils"
 	"k8s.io/kops/util/pkg/vfs"
@@ -35,7 +35,7 @@ type Addons struct {
 }
 
 func LoadAddons(name string, location *url.URL) (*Addons, error) {
-	glog.V(2).Infof("Loading addons channel from %q", location)
+	klog.V(2).Infof("Loading addons channel from %q", location)
 	data, err := vfs.Context.ReadFile(location.String())
 	if err != nil {
 		return nil, fmt.Errorf("error reading addons from %q: %v", location, err)
@@ -54,6 +54,20 @@ func ParseAddons(name string, location *url.URL, data []byte) (*Addons, error) {
 		err := utils.YamlUnmarshal([]byte(configString), apiObject)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing addons: %v", err)
+		}
+	}
+
+	for _, addon := range apiObject.Spec.Addons {
+		if addon != nil && addon.Version != nil && *addon.Version != "" {
+			name := apiObject.ObjectMeta.Name
+			if addon.Name != nil {
+				name = *addon.Name
+			}
+
+			_, err := semver.ParseTolerant(*addon.Version)
+			if err != nil {
+				return nil, fmt.Errorf("addon %q has unparseable version %q: %v", name, *addon.Version, err)
+			}
 		}
 	}
 
@@ -106,11 +120,11 @@ func (s *Addon) matches(kubernetesVersion semver.Version) bool {
 	if s.Spec.KubernetesVersion != "" {
 		versionRange, err := semver.ParseRange(s.Spec.KubernetesVersion)
 		if err != nil {
-			glog.Warningf("unable to parse KubernetesVersion %q; skipping", s.Spec.KubernetesVersion)
+			klog.Warningf("unable to parse KubernetesVersion %q; skipping", s.Spec.KubernetesVersion)
 			return false
 		}
 		if !versionRange(kubernetesVersion) {
-			glog.V(4).Infof("Skipping version range %q that does not match current version %s", s.Spec.KubernetesVersion, kubernetesVersion)
+			klog.V(4).Infof("Skipping version range %q that does not match current version %s", s.Spec.KubernetesVersion, kubernetesVersion)
 			return false
 		}
 	}

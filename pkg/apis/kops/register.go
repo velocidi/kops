@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ var (
 //var ParameterCodec = runtime.NewParameterCodec(Scheme)
 
 // GroupName is the group name use in this package
-const GroupName = "kops"
+const GroupName = "kops.k8s.io"
 
 // SchemeGroupVersion is the group version used to register these objects
 var SchemeGroupVersion = schema.GroupVersion{Group: GroupName, Version: runtime.APIVersionInternal}

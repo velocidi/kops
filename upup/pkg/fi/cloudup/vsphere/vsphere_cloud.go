@@ -26,7 +26,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/golang/glog"
 	"github.com/pkg/errors"
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
@@ -36,7 +35,8 @@ import (
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/soap"
 	"github.com/vmware/govmomi/vim25/types"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/klog"
 	"k8s.io/kops/dnsprovider/pkg/dnsprovider"
 	k8scoredns "k8s.io/kops/dnsprovider/pkg/dnsprovider/providers/coredns"
 	"k8s.io/kops/pkg/apis/kops"
@@ -69,12 +69,19 @@ func (c *VSphereCloud) ProviderID() kops.CloudProviderID {
 	return kops.CloudProviderVSphere
 }
 
+// Region returns the region bound to the VsphereCloud.
+func (c *VSphereCloud) Region() string {
+	// TODO: map region with vCenter cluster, or datacenter, or datastore?
+	region := c.Cluster
+	return region
+}
+
 // NewVSphereCloud returns VSphereCloud instance for given ClusterSpec.
 func NewVSphereCloud(spec *kops.ClusterSpec) (*VSphereCloud, error) {
 	server := *spec.CloudConfig.VSphereServer
 	datacenter := *spec.CloudConfig.VSphereDatacenter
 	cluster := *spec.CloudConfig.VSphereResourcePool
-	glog.V(2).Infof("Creating vSphere Cloud with server(%s), datacenter(%s), cluster(%s)", server, datacenter, cluster)
+	klog.V(2).Infof("Creating vSphere Cloud with server(%s), datacenter(%s), cluster(%s)", server, datacenter, cluster)
 
 	dns_server := *spec.CloudConfig.VSphereCoreDNSServer
 	dns_zone := spec.DNSZone
@@ -88,7 +95,7 @@ func NewVSphereCloud(spec *kops.ClusterSpec) (*VSphereCloud, error) {
 	if err != nil {
 		return nil, err
 	}
-	glog.V(2).Infof("Creating vSphere Cloud URL is %s", u)
+	klog.V(2).Infof("Creating vSphere Cloud URL is %s", u)
 
 	// set username and password in URL
 	u.User = url.UserPassword(username, password)
@@ -102,26 +109,32 @@ func NewVSphereCloud(spec *kops.ClusterSpec) (*VSphereCloud, error) {
 	vsphereCloud := &VSphereCloud{Server: server, Datacenter: datacenter, Cluster: cluster, Username: username, Password: password, Client: c, CoreDNSServer: dns_server, DNSZone: dns_zone}
 	spec.CloudConfig.VSphereUsername = fi.String(username)
 	spec.CloudConfig.VSpherePassword = fi.String(password)
-	glog.V(2).Infof("Created vSphere Cloud successfully: %+v", vsphereCloud)
+	klog.V(2).Infof("Created vSphere Cloud successfully: %+v", vsphereCloud)
 	return vsphereCloud, nil
 }
 
 // GetCloudGroups is not implemented yet, that needs to return the instances and groups that back a kops cluster.
 func (c *VSphereCloud) GetCloudGroups(cluster *kops.Cluster, instancegroups []*kops.InstanceGroup, warnUnmatched bool, nodes []v1.Node) (map[string]*cloudinstances.CloudInstanceGroup, error) {
-	glog.V(8).Infof("vSphere cloud provider GetCloudGroups not implemented yet")
+	klog.V(8).Infof("vSphere cloud provider GetCloudGroups not implemented yet")
 	return nil, fmt.Errorf("vSphere cloud provider does not support getting cloud groups at this time")
 }
 
 // DeleteGroup is not implemented yet, is a func that needs to delete a vSphere instance group.
 func (c *VSphereCloud) DeleteGroup(g *cloudinstances.CloudInstanceGroup) error {
-	glog.V(8).Infof("vSphere cloud provider DeleteGroup not implemented yet")
+	klog.V(8).Infof("vSphere cloud provider DeleteGroup not implemented yet")
 	return fmt.Errorf("vSphere cloud provider does not support deleting cloud groups at this time.")
 }
 
 // DeleteInstance is not implemented yet, is func needs to delete a vSphereCloud instance.
 func (c *VSphereCloud) DeleteInstance(i *cloudinstances.CloudInstanceGroupMember) error {
-	glog.V(8).Infof("vSphere cloud provider DeleteInstance not implemented yet")
+	klog.V(8).Infof("vSphere cloud provider DeleteInstance not implemented yet")
 	return fmt.Errorf("vSphere cloud provider does not support deleting cloud instances at this time.")
+}
+
+// DetachInstance is not implemented yet. It needs to cause a cloud instance to no longer be counted against the group's size limits.
+func (c *VSphereCloud) DetachInstance(i *cloudinstances.CloudInstanceGroupMember) error {
+	klog.V(8).Info("vSphere cloud provider DetachInstance not implemented yet")
+	return fmt.Errorf("vSphere cloud provider does not support surging")
 }
 
 // DNS returns dnsprovider interface for this vSphere cloud.
@@ -144,7 +157,7 @@ func (c *VSphereCloud) DNS() (dnsprovider.Interface, error) {
 
 // FindVPCInfo doesn't perform any operation for now. No VPC is present for vSphere.
 func (c *VSphereCloud) FindVPCInfo(id string) (*fi.VPCInfo, error) {
-	glog.Warning("FindVPCInfo not (yet) implemented on VSphere")
+	klog.Warning("FindVPCInfo not (yet) implemented on VSphere")
 	return nil, nil
 }
 
@@ -165,7 +178,7 @@ func (c *VSphereCloud) CreateLinkClonedVm(vmName, vmImage *string) (string, erro
 		return "", err
 	}
 
-	glog.V(2).Infof("Template VM ref is %+v", templateVm)
+	klog.V(2).Infof("Template VM ref is %+v", templateVm)
 	datacenterFolders, err := dc.Folders(ctx)
 	if err != nil {
 		return "", err
@@ -178,13 +191,13 @@ func (c *VSphereCloud) CreateLinkClonedVm(vmName, vmImage *string) (string, erro
 	}
 
 	clsComputeRes, err := f.ClusterComputeResource(ctx, c.Cluster)
-	glog.V(4).Infof("Cluster compute resource is %+v", clsComputeRes)
+	klog.V(4).Infof("Cluster compute resource is %+v", clsComputeRes)
 	if err != nil {
 		return "", err
 	}
 
 	resPool, err := clsComputeRes.ResourcePool(ctx)
-	glog.V(4).Infof("Cluster resource pool is %+v", resPool)
+	klog.V(4).Infof("Cluster resource pool is %+v", resPool)
 	if err != nil {
 		return "", err
 	}
@@ -221,7 +234,7 @@ func (c *VSphereCloud) CreateLinkClonedVm(vmName, vmImage *string) (string, erro
 	}
 
 	clonedVm := clonedVmTaskInfo.Result.(object.Reference)
-	glog.V(2).Infof("Created VM %s successfully", clonedVm)
+	klog.V(2).Infof("Created VM %s successfully", clonedVm)
 
 	return clonedVm.Reference().Value, nil
 }
@@ -272,30 +285,30 @@ func (c *VSphereCloud) UploadAndAttachISO(vm *string, isoFile string) error {
 	pc := property.DefaultCollector(c.Client.Client)
 	err = pc.RetrieveOne(ctx, vmRef.Reference(), []string{"datastore"}, &vmResult)
 	if err != nil {
-		glog.Fatalf("Unable to retrieve VM summary for VM %s", *vm)
+		klog.Fatalf("Unable to retrieve VM summary for VM %s", *vm)
 	}
-	glog.V(4).Infof("vm property collector result :%+v\n", vmResult)
+	klog.V(4).Infof("vm property collector result :%+v\n", vmResult)
 
 	// We expect the VM to be on only 1 datastore
 	dsRef := vmResult.Datastore[0].Reference()
 	var dsResult mo.Datastore
 	err = pc.RetrieveOne(ctx, dsRef, []string{"summary"}, &dsResult)
 	if err != nil {
-		glog.Fatalf("Unable to retrieve datastore summary for datastore  %s", dsRef)
+		klog.Fatalf("Unable to retrieve datastore summary for datastore  %s", dsRef)
 	}
-	glog.V(4).Infof("datastore property collector result :%+v\n", dsResult)
+	klog.V(4).Infof("datastore property collector result :%+v\n", dsResult)
 	dsObj, err := f.Datastore(ctx, dsResult.Summary.Name)
 	if err != nil {
 		return err
 	}
 	p := soap.DefaultUpload
 	dstIsoFile := getCloudInitFileName(*vm)
-	glog.V(2).Infof("Uploading ISO file %s to datastore %+v, destination iso is %s\n", isoFile, dsObj, dstIsoFile)
+	klog.V(2).Infof("Uploading ISO file %s to datastore %+v, destination iso is %s\n", isoFile, dsObj, dstIsoFile)
 	err = dsObj.UploadFile(ctx, isoFile, dstIsoFile, &p)
 	if err != nil {
 		return err
 	}
-	glog.V(2).Infof("Uploaded ISO file %s", isoFile)
+	klog.V(2).Infof("Uploaded ISO file %s", isoFile)
 
 	// Find the cd-rom device and insert the cloud init iso file into it.
 	devices, err := vmRef.Device(ctx)
@@ -310,7 +323,7 @@ func (c *VSphereCloud) UploadAndAttachISO(vm *string, isoFile string) error {
 		return err
 	}
 	iso := dsObj.Path(dstIsoFile)
-	glog.V(2).Infof("Inserting ISO file %s into cd-rom", iso)
+	klog.V(2).Infof("Inserting ISO file %s into cd-rom", iso)
 	return vmRef.EditDevice(ctx, devices.InsertIso(cdrom, iso))
 
 }
@@ -339,8 +352,8 @@ func (c *VSphereCloud) FindVMUUID(vm *string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	glog.V(4).Infof("vm property collector result :%+v\n", vmResult)
-	glog.V(3).Infof("retrieved vm uuid as %q for vm %q", vmResult.Config.Uuid, *vm)
+	klog.V(4).Infof("vm property collector result :%+v\n", vmResult)
+	klog.V(3).Infof("retrieved vm uuid as %q for vm %q", vmResult.Config.Uuid, *vm)
 	return vmResult.Config.Uuid, nil
 }
 
@@ -404,18 +417,18 @@ func (c *VSphereCloud) DeleteCloudInitISO(vm *string) error {
 	pc := property.DefaultCollector(c.Client.Client)
 	err = pc.RetrieveOne(ctx, vmRef.Reference(), []string{"datastore"}, &vmResult)
 	if err != nil {
-		glog.Fatalf("Unable to retrieve VM summary for VM %s", *vm)
+		klog.Fatalf("Unable to retrieve VM summary for VM %s", *vm)
 	}
-	glog.V(4).Infof("vm property collector result :%+v\n", vmResult)
+	klog.V(4).Infof("vm property collector result :%+v\n", vmResult)
 
 	// We expect the VM to be on only 1 datastore
 	dsRef := vmResult.Datastore[0].Reference()
 	var dsResult mo.Datastore
 	err = pc.RetrieveOne(ctx, dsRef, []string{"summary"}, &dsResult)
 	if err != nil {
-		glog.Fatalf("Unable to retrieve datastore summary for datastore  %s", dsRef)
+		klog.Fatalf("Unable to retrieve datastore summary for datastore  %s", dsRef)
 	}
-	glog.V(4).Infof("datastore property collector result :%+v\n", dsResult)
+	klog.V(4).Infof("datastore property collector result :%+v\n", dsResult)
 	dsObj, err := f.Datastore(ctx, dsResult.Summary.Name)
 	if err != nil {
 		return err
@@ -425,12 +438,12 @@ func (c *VSphereCloud) DeleteCloudInitISO(vm *string) error {
 	err = fileManager.DeleteFile(ctx, isoFileName)
 	if err != nil {
 		if types.IsFileNotFound(err) {
-			glog.Warningf("ISO file not found: %q", isoFileName)
+			klog.Warningf("ISO file not found: %q", isoFileName)
 			return nil
 		}
 		return err
 	}
-	glog.V(2).Infof("Deleted ISO file %q", isoFileName)
+	klog.V(2).Infof("Deleted ISO file %q", isoFileName)
 	return nil
 }
 

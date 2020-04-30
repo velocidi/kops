@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -104,11 +104,11 @@ func (c *ResourceRecordChangeset) Apply() error {
 	}
 	newAdditions := newChange.Additions()
 	if len(newAdditions) != len(additions) {
-		return fmt.Errorf("Internal error when adding resource record set.  Call succeeded but number of records returned is incorrect.  Records sent=%d, records returned=%d, additions:%v", len(additions), len(newAdditions), c.additions)
+		return fmt.Errorf("internal error when adding resource record set.  Call succeeded but number of records returned is incorrect.  Records sent=%d, records returned=%d, additions:%v", len(additions), len(newAdditions), c.additions)
 	}
 	newDeletions := newChange.Deletions()
 	if len(newDeletions) != len(deletions) {
-		return fmt.Errorf("Internal error when deleting resource record set.  Call succeeded but number of records returned is incorrect.  Records sent=%d, records returned=%d, deletions:%v", len(deletions), len(newDeletions), c.removals)
+		return fmt.Errorf("internal error when deleting resource record set.  Call succeeded but number of records returned is incorrect.  Records sent=%d, records returned=%d, deletions:%v", len(deletions), len(newDeletions), c.removals)
 	}
 
 	return nil

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	"k8s.io/kops/upup/pkg/fi/utils"
+
+	"k8s.io/kops/util/pkg/reflectutils"
 )
 
 func RequiredField(key string) error {
@@ -33,6 +34,6 @@ func CannotChangeField(key string) error {
 }
 
 func FieldIsImmutable(newVal, oldVal interface{}, fldPath *field.Path) *field.Error {
-	details := fmt.Sprintf("%s: old=%v new=%v", validation.FieldImmutableErrorMsg, utils.FormatValue(oldVal), utils.FormatValue(newVal))
-	return field.Invalid(fldPath, newVal, details)
+	details := fmt.Sprintf("%s: old=%v new=%v", validation.FieldImmutableErrorMsg, reflectutils.FormatValue(oldVal), reflectutils.FormatValue(newVal))
+	return field.Forbidden(fldPath, details)
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rsa"
 	"fmt"
 	"os"
@@ -28,8 +29,8 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/upup/pkg/fi"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 )
 
 var (
@@ -39,7 +40,7 @@ var (
 
 	// TODO: what is an example??
 	describeSecretExample = templates.Examples(i18n.T(`
-	
+
 	`))
 	describeSecretShort = i18n.T(`Describe a cluster secret`)
 )
@@ -58,7 +59,8 @@ func init() {
 		Long:    describeSecretLong,
 		Example: describeSecretExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := describeSecretsCommand.Run(args)
+			ctx := context.TODO()
+			err := describeSecretsCommand.Run(ctx, args)
 			if err != nil {
 				exitWithError(err)
 			}
@@ -70,8 +72,8 @@ func init() {
 	cmd.Flags().StringVarP(&describeSecretsCommand.Type, "type", "", "", "Filter by secret type")
 }
 
-func (c *DescribeSecretsCommand) Run(args []string) error {
-	cluster, err := rootCommand.Cluster()
+func (c *DescribeSecretsCommand) Run(ctx context.Context, args []string) error {
+	cluster, err := rootCommand.Cluster(ctx)
 	if err != nil {
 		return err
 	}

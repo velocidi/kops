@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,7 +28,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
+
+	"k8s.io/kops/pkg/try"
 )
 
 type HashAlgorithm string
@@ -64,7 +66,7 @@ func (ha HashAlgorithm) NewHasher() hash.Hash {
 		return sha256.New()
 	}
 
-	glog.Exitf("Unknown hash algorithm: %v", ha)
+	klog.Exitf("Unknown hash algorithm: %v", ha)
 	return nil
 }
 
@@ -132,32 +134,8 @@ func (ha HashAlgorithm) HashFile(p string) (*Hash, error) {
 		}
 		return nil, fmt.Errorf("error opening file %q: %v", p, err)
 	}
-	defer f.Close()
+	defer try.CloseFile(f)
 	return ha.Hash(f)
-}
-
-func HashesForResource(r io.Reader, hashAlgorithms []HashAlgorithm) ([]*Hash, error) {
-	var hashers []hash.Hash
-	var writers []io.Writer
-	for _, hashAlgorithm := range hashAlgorithms {
-		hasher := hashAlgorithm.NewHasher()
-		hashers = append(hashers, hasher)
-		writers = append(writers, hasher)
-	}
-
-	w := io.MultiWriter(writers...)
-
-	_, err := copyToHasher(w, r)
-	if err != nil {
-		return nil, fmt.Errorf("error while hashing resource: %v", err)
-	}
-
-	var hashes []*Hash
-	for i, hasher := range hashers {
-		hashes = append(hashes, &Hash{Algorithm: hashAlgorithms[i], HashValue: hasher.Sum(nil)})
-	}
-
-	return hashes, nil
 }
 
 func copyToHasher(dest io.Writer, src io.Reader) (int64, error) {

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
 	"github.com/aws/aws-sdk-go/service/elb"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
@@ -126,7 +126,7 @@ func (_ *LoadBalancerAttachment) RenderAWS(t *awsup.AWSAPITarget, a, e, changes 
 		request.AutoScalingGroupName = e.AutoscalingGroup.Name
 		request.LoadBalancerNames = aws.StringSlice([]string{loadBalancerName})
 
-		glog.V(2).Infof("Attaching autoscaling group %q to ELB %q", fi.StringValue(e.AutoscalingGroup.Name), loadBalancerName)
+		klog.V(2).Infof("Attaching autoscaling group %q to ELB %q", fi.StringValue(e.AutoscalingGroup.Name), loadBalancerName)
 		_, err := t.Cloud.Autoscaling().AttachLoadBalancers(request)
 		if err != nil {
 			return fmt.Errorf("error attaching autoscaling group to ELB: %v", err)
@@ -136,7 +136,7 @@ func (_ *LoadBalancerAttachment) RenderAWS(t *awsup.AWSAPITarget, a, e, changes 
 		request.Instances = append(request.Instances, &elb.Instance{InstanceId: e.Instance.ID})
 		request.LoadBalancerName = aws.String(loadBalancerName)
 
-		glog.V(2).Infof("Attaching instance %q to ELB %q", fi.StringValue(e.Instance.ID), loadBalancerName)
+		klog.V(2).Infof("Attaching instance %q to ELB %q", fi.StringValue(e.Instance.ID), loadBalancerName)
 		_, err := t.Cloud.ELB().RegisterInstancesWithLoadBalancer(request)
 		if err != nil {
 			return fmt.Errorf("error attaching instance to ELB: %v", err)
@@ -146,9 +146,9 @@ func (_ *LoadBalancerAttachment) RenderAWS(t *awsup.AWSAPITarget, a, e, changes 
 }
 
 type terraformLoadBalancerAttachment struct {
-	ELB              *terraform.Literal `json:"elb"`
-	Instance         *terraform.Literal `json:"instance,omitempty"`
-	AutoscalingGroup *terraform.Literal `json:"autoscaling_group_name,omitempty"`
+	ELB              *terraform.Literal `json:"elb" cty:"elb"`
+	Instance         *terraform.Literal `json:"instance,omitempty" cty:"instance"`
+	AutoscalingGroup *terraform.Literal `json:"autoscaling_group_name,omitempty" cty:"autoscaling_group_name"`
 }
 
 func (_ *LoadBalancerAttachment) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *LoadBalancerAttachment) error {

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
@@ -67,7 +67,7 @@ func (e *Route) Find(c *fi.Context) (*Route, error) {
 		return nil, nil
 	} else {
 		if len(response.RouteTables) != 1 {
-			glog.Fatalf("found multiple RouteTables matching tags")
+			klog.Fatalf("found multiple RouteTables matching tags")
 		}
 		rt := response.RouteTables[0]
 		for _, r := range rt.Routes {
@@ -90,7 +90,7 @@ func (e *Route) Find(c *fi.Context) (*Route, error) {
 			}
 
 			if aws.StringValue(r.State) == "blackhole" {
-				glog.V(2).Infof("found route is a blackhole route")
+				klog.V(2).Infof("found route is a blackhole route")
 				// These should be nil anyway, but just in case...
 				actual.Instance = nil
 				actual.InternetGateway = nil
@@ -99,7 +99,7 @@ func (e *Route) Find(c *fi.Context) (*Route, error) {
 			// Prevent spurious changes
 			actual.Lifecycle = e.Lifecycle
 
-			glog.V(2).Infof("found route matching cidr %s", *e.CIDR)
+			klog.V(2).Infof("found route matching cidr %s", *e.CIDR)
 			return actual, nil
 		}
 	}
@@ -171,7 +171,7 @@ func (_ *Route) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Route) error {
 			request.InstanceId = checkNotNil(e.Instance.ID)
 		}
 
-		glog.V(2).Infof("Creating Route with RouteTable:%q CIDR:%q", *e.RouteTable.ID, *e.CIDR)
+		klog.V(2).Infof("Creating Route with RouteTable:%q CIDR:%q", *e.RouteTable.ID, *e.CIDR)
 
 		response, err := t.Cloud.EC2().CreateRoute(request)
 		if err != nil {
@@ -202,7 +202,7 @@ func (_ *Route) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Route) error {
 			request.InstanceId = checkNotNil(e.Instance.ID)
 		}
 
-		glog.V(2).Infof("Updating Route with RouteTable:%q CIDR:%q", *e.RouteTable.ID, *e.CIDR)
+		klog.V(2).Infof("Updating Route with RouteTable:%q CIDR:%q", *e.RouteTable.ID, *e.CIDR)
 
 		_, err := t.Cloud.EC2().ReplaceRoute(request)
 		if err != nil {
@@ -215,17 +215,17 @@ func (_ *Route) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Route) error {
 
 func checkNotNil(s *string) *string {
 	if s == nil {
-		glog.Fatal("string pointer was unexpectedly nil")
+		klog.Fatal("string pointer was unexpectedly nil")
 	}
 	return s
 }
 
 type terraformRoute struct {
-	RouteTableID      *terraform.Literal `json:"route_table_id"`
-	CIDR              *string            `json:"destination_cidr_block,omitempty"`
-	InternetGatewayID *terraform.Literal `json:"gateway_id,omitempty"`
-	NATGatewayID      *terraform.Literal `json:"nat_gateway_id,omitempty"`
-	InstanceID        *terraform.Literal `json:"instance_id,omitempty"`
+	RouteTableID      *terraform.Literal `json:"route_table_id" cty:"route_table_id"`
+	CIDR              *string            `json:"destination_cidr_block,omitempty" cty:"destination_cidr_block"`
+	InternetGatewayID *terraform.Literal `json:"gateway_id,omitempty" cty:"gateway_id"`
+	NATGatewayID      *terraform.Literal `json:"nat_gateway_id,omitempty" cty:"nat_gateway_id"`
+	InstanceID        *terraform.Literal `json:"instance_id,omitempty" cty:"instance_id"`
 }
 
 func (_ *Route) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *Route) error {
@@ -246,7 +246,10 @@ func (_ *Route) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *Rou
 		tf.InstanceID = e.Instance.TerraformLink()
 	}
 
-	return t.RenderResource("aws_route", *e.Name, tf)
+	// Terraform 0.12 doesn't support resource names that start with digits. See #7052
+	// and https://www.terraform.io/upgrade-guides/0-12.html#pre-upgrade-checklist
+	name := fmt.Sprintf("route-%v", *e.Name)
+	return t.RenderResource("aws_route", name, tf)
 }
 
 type cloudformationRoute struct {

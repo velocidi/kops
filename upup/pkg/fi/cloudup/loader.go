@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,14 +26,15 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/util/sets"
-	api "k8s.io/kops/pkg/apis/kops"
+	"k8s.io/klog"
+	kopsapi "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/assets"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/assettasks"
 	"k8s.io/kops/upup/pkg/fi/loader"
 	"k8s.io/kops/upup/pkg/fi/utils"
+	"k8s.io/kops/util/pkg/reflectutils"
 	"k8s.io/kops/util/pkg/vfs"
 )
 
@@ -43,7 +44,7 @@ const (
 )
 
 type Loader struct {
-	Cluster *api.Cluster
+	Cluster *kopsapi.Cluster
 
 	WorkDir string
 
@@ -53,8 +54,6 @@ type Loader struct {
 	TemplateFunctions template.FuncMap
 
 	typeMap map[string]reflect.Type
-
-	templates []*template.Template
 
 	Resources map[string]fi.Resource
 
@@ -101,7 +100,7 @@ func (l *Loader) AddTypes(types map[string]interface{}) {
 	for key, proto := range types {
 		_, exists := l.typeMap[key]
 		if exists {
-			glog.Fatalf("duplicate type key: %q", key)
+			klog.Fatalf("duplicate type key: %q", key)
 		}
 
 		t := reflect.TypeOf(proto)
@@ -226,23 +225,23 @@ func (l *Loader) addAssetCopyTasks(assets []*assets.ContainerAsset, lifecycle *f
 func (l *Loader) addAssetFileCopyTasks(assets []*assets.FileAsset, lifecycle *fi.Lifecycle) error {
 	for _, asset := range assets {
 
-		if asset.FileURL == nil {
+		if asset.DownloadURL == nil {
 			return fmt.Errorf("asset file url cannot be nil")
 		}
 
 		// test if the asset needs to be copied
-		if asset.CanonicalFileURL != nil && asset.FileURL.String() != asset.CanonicalFileURL.String() {
-			glog.V(10).Infof("processing asset: %q, %q", asset.FileURL.String(), asset.CanonicalFileURL.String())
+		if asset.CanonicalURL != nil && asset.DownloadURL.String() != asset.CanonicalURL.String() {
+			klog.V(10).Infof("processing asset: %q, %q", asset.DownloadURL.String(), asset.CanonicalURL.String())
 			context := &fi.ModelBuilderContext{
 				Tasks: l.tasks,
 			}
 
-			glog.V(10).Infof("adding task: %q", asset.FileURL.String())
+			klog.V(10).Infof("adding task: %q", asset.DownloadURL.String())
 
 			copyFileTask := &assettasks.CopyFile{
-				Name:       fi.String(asset.CanonicalFileURL.String()),
-				TargetFile: fi.String(asset.FileURL.String()),
-				SourceFile: fi.String(asset.CanonicalFileURL.String()),
+				Name:       fi.String(asset.CanonicalURL.String()),
+				TargetFile: fi.String(asset.DownloadURL.String()),
+				SourceFile: fi.String(asset.CanonicalURL.String()),
 				SHA:        fi.String(asset.SHAValue),
 				Lifecycle:  lifecycle,
 			}
@@ -260,8 +259,8 @@ func (l *Loader) processDeferrals() error {
 	for taskKey, task := range l.tasks {
 		taskValue := reflect.ValueOf(task)
 
-		err := utils.ReflectRecursive(taskValue, func(path string, f *reflect.StructField, v reflect.Value) error {
-			if utils.IsPrimitiveValue(v) {
+		err := reflectutils.ReflectRecursive(taskValue, func(path string, f *reflect.StructField, v reflect.Value) error {
+			if reflectutils.IsPrimitiveValue(v) {
 				return nil
 			}
 
@@ -288,18 +287,18 @@ func (l *Loader) processDeferrals() error {
 								for k := range l.tasks {
 									keys.Insert(k)
 								}
-								glog.Infof("Known tasks:")
+								klog.Infof("Known tasks:")
 								for _, k := range keys.List() {
-									glog.Infof("  %s", k)
+									klog.Infof("  %s", k)
 								}
 
-								return fmt.Errorf("Unable to find task %q, referenced from %s:%s", typeNameForTask+"/"+*name, taskKey, path)
+								return fmt.Errorf("unable to find task %q, referenced from %s:%s", typeNameForTask+"/"+*name, taskKey, path)
 							}
 
-							glog.V(11).Infof("Replacing task %q at %s:%s", *name, taskKey, path)
+							klog.V(11).Infof("Replacing task %q at %s:%s", *name, taskKey, path)
 							v.Set(reflect.ValueOf(primary))
 						}
-						return utils.SkipReflection
+						return reflectutils.SkipReflection
 					} else if rh, ok := intf.(*fi.ResourceHolder); ok {
 						if rh.Resource == nil {
 							//Resources can contain template 'arguments', separated by spaces
@@ -312,11 +311,11 @@ func (l *Loader) processDeferrals() error {
 							resource := l.Resources[match]
 
 							if resource == nil {
-								glog.Infof("Known resources:")
+								klog.Infof("Known resources:")
 								for k := range l.Resources {
-									glog.Infof("  %s", k)
+									klog.Infof("  %s", k)
 								}
-								return fmt.Errorf("Unable to find resource %q, referenced from %s:%s", rh.Name, taskKey, path)
+								return fmt.Errorf("unable to find resource %q, referenced from %s:%s", rh.Name, taskKey, path)
 							}
 
 							err := l.populateResource(rh, resource, args)
@@ -324,7 +323,7 @@ func (l *Loader) processDeferrals() error {
 								return fmt.Errorf("error setting resource value: %v", err)
 							}
 						}
-						return utils.SkipReflection
+						return reflectutils.SkipReflection
 					}
 				}
 			}
@@ -350,7 +349,7 @@ func (l *Loader) resourceHandler(i *loader.TreeWalkItem) error {
 	key := i.RelativePath
 	if strings.HasSuffix(key, ".template") {
 		key = strings.TrimSuffix(key, ".template")
-		glog.V(2).Infof("loading (templated) resource %q", key)
+		klog.V(2).Infof("loading (templated) resource %q", key)
 
 		a = &templateResource{
 			template: string(contents),
@@ -358,7 +357,7 @@ func (l *Loader) resourceHandler(i *loader.TreeWalkItem) error {
 			key:      key,
 		}
 	} else {
-		glog.V(2).Infof("loading resource %q", key)
+		klog.V(2).Infof("loading resource %q", key)
 		a = fi.NewBytesResource(contents)
 
 	}
@@ -368,7 +367,7 @@ func (l *Loader) resourceHandler(i *loader.TreeWalkItem) error {
 }
 
 func (l *Loader) objectHandler(i *loader.TreeWalkItem) error {
-	glog.V(8).Infof("Reading %s", i.Path)
+	klog.V(8).Infof("Reading %s", i.Path)
 	contents, err := i.ReadString()
 	if err != nil {
 		return err
@@ -400,7 +399,7 @@ func (l *Loader) loadYamlObjects(key string, data string) (map[string]interface{
 		err := utils.YamlUnmarshal([]byte(data), &o)
 		if err != nil {
 			// TODO: It would be nice if yaml returned us the line number here
-			glog.Infof("error parsing yaml.  yaml follows:")
+			klog.Infof("error parsing yaml.  yaml follows:")
 			for i, line := range strings.Split(string(data), "\n") {
 				fmt.Fprintf(os.Stderr, "%3d: %s\n", i, line)
 			}
@@ -457,14 +456,14 @@ func (l *Loader) loadObjectMap(key string, data map[string]interface{}) (map[str
 		// TODO replace with partial unmarshal...
 		jsonValue, err := json.Marshal(v)
 		if err != nil {
-			return nil, fmt.Errorf("error marshalling to json: %v", err)
+			return nil, fmt.Errorf("error marshaling to json: %v", err)
 		}
 		err = json.Unmarshal(jsonValue, o.Interface())
 		if err != nil {
-			glog.V(2).Infof("JSON was %q", string(jsonValue))
+			klog.V(2).Infof("JSON was %q", string(jsonValue))
 			return nil, fmt.Errorf("error parsing %q: %v", key, err)
 		}
-		glog.V(4).Infof("Built %s:%s => %v", key, k, o.Interface())
+		klog.V(4).Infof("Built %s:%s => %v", key, k, o.Interface())
 
 		if inferredName {
 			hn, ok := o.Interface().(fi.HasName)

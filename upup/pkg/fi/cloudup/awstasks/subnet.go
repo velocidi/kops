@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
@@ -31,7 +31,13 @@ import (
 
 //go:generate fitask -type=Subnet
 type Subnet struct {
-	Name      *string
+	Name *string
+
+	// ShortName is a shorter name, for use in terraform outputs
+	// ShortName is expected to be unique across all subnets in the cluster,
+	// so it is typically set to the name of the Subnet, in the cluster spec.
+	ShortName *string
+
 	Lifecycle *fi.Lifecycle
 
 	ID               *string
@@ -78,11 +84,12 @@ func (e *Subnet) Find(c *fi.Context) (*Subnet, error) {
 		Tags:             intersectTags(subnet.Tags, e.Tags),
 	}
 
-	glog.V(2).Infof("found matching subnet %q", *actual.ID)
+	klog.V(2).Infof("found matching subnet %q", *actual.ID)
 	e.ID = actual.ID
 
 	// Prevent spurious changes
-	actual.Lifecycle = e.Lifecycle // Lifecycle is not materialized in AWS
+	actual.Lifecycle = e.Lifecycle // Not materialized in AWS
+	actual.ShortName = e.ShortName // Not materialized in AWS
 	actual.Name = e.Name           // Name is part of Tags
 
 	return actual, nil
@@ -107,7 +114,7 @@ func (e *Subnet) findEc2Subnet(c *fi.Context) (*ec2.Subnet, error) {
 	}
 
 	if len(response.Subnets) != 1 {
-		glog.Fatalf("found multiple Subnets matching tags")
+		klog.Fatalf("found multiple Subnets matching tags")
 	}
 
 	subnet := response.Subnets[0]
@@ -134,7 +141,7 @@ func (s *Subnet) CheckChanges(a, e, changes *Subnet) error {
 	}
 
 	if a != nil {
-		// TODO: Do we want to destroy & recreate the subnet when theses immutable fields change?
+		// TODO: Do we want to destroy & recreate the subnet when these immutable fields change?
 		if changes.VPC != nil {
 			var aID *string
 			if a.VPC != nil {
@@ -171,7 +178,7 @@ func (_ *Subnet) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Subnet) error {
 	}
 
 	if a == nil {
-		glog.V(2).Infof("Creating Subnet with CIDR: %q", *e.CIDR)
+		klog.V(2).Infof("Creating Subnet with CIDR: %q", *e.CIDR)
 
 		request := &ec2.CreateSubnetInput{
 			CidrBlock:        e.CIDR,
@@ -198,7 +205,7 @@ func subnetSlicesEqualIgnoreOrder(l, r []*Subnet) bool {
 	var rIDs []string
 	for _, s := range r {
 		if s.ID == nil {
-			glog.V(4).Infof("Subnet ID not set; returning not-equal: %v", s)
+			klog.V(4).Infof("Subnet ID not set; returning not-equal: %v", s)
 			return false
 		}
 		rIDs = append(rIDs, *s.ID)
@@ -207,13 +214,20 @@ func subnetSlicesEqualIgnoreOrder(l, r []*Subnet) bool {
 }
 
 type terraformSubnet struct {
-	VPCID            *terraform.Literal `json:"vpc_id"`
-	CIDR             *string            `json:"cidr_block"`
-	AvailabilityZone *string            `json:"availability_zone"`
-	Tags             map[string]string  `json:"tags,omitempty"`
+	VPCID            *terraform.Literal `json:"vpc_id" cty:"vpc_id"`
+	CIDR             *string            `json:"cidr_block" cty:"cidr_block"`
+	AvailabilityZone *string            `json:"availability_zone" cty:"availability_zone"`
+	Tags             map[string]string  `json:"tags,omitempty" cty:"tags"`
 }
 
 func (_ *Subnet) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *Subnet) error {
+	if fi.StringValue(e.ShortName) != "" {
+		name := fi.StringValue(e.ShortName)
+		if err := t.AddOutputVariable("subnet_"+name+"_id", e.TerraformLink()); err != nil {
+			return err
+		}
+	}
+
 	shared := fi.BoolValue(e.Shared)
 	if shared {
 		// Not terraform owned / managed
@@ -239,10 +253,10 @@ func (e *Subnet) TerraformLink() *terraform.Literal {
 	shared := fi.BoolValue(e.Shared)
 	if shared {
 		if e.ID == nil {
-			glog.Fatalf("ID must be set, if subnet is shared: %s", e)
+			klog.Fatalf("ID must be set, if subnet is shared: %s", e)
 		}
 
-		glog.V(4).Infof("reusing existing subnet with id %q", *e.ID)
+		klog.V(4).Infof("reusing existing subnet with id %q", *e.ID)
 		return terraform.LiteralFromStringValue(*e.ID)
 	}
 
@@ -278,10 +292,10 @@ func (e *Subnet) CloudformationLink() *cloudformation.Literal {
 	shared := fi.BoolValue(e.Shared)
 	if shared {
 		if e.ID == nil {
-			glog.Fatalf("ID must be set, if subnet is shared: %s", e)
+			klog.Fatalf("ID must be set, if subnet is shared: %s", e)
 		}
 
-		glog.V(4).Infof("reusing existing subnet with id %q", *e.ID)
+		klog.V(4).Infof("reusing existing subnet with id %q", *e.ID)
 		return cloudformation.LiteralString(*e.ID)
 	}
 

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,21 +21,21 @@ import (
 	"net/url"
 
 	"github.com/blang/semver"
-	"github.com/golang/glog"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops/util"
 	"k8s.io/kops/util/pkg/vfs"
 )
 
 var DefaultChannelBase = "https://raw.githubusercontent.com/kubernetes/kops/master/channels/"
 
-const DefaultChannel = "stable"
-const AlphaChannel = "alpha"
+const (
+	DefaultChannel = "stable"
+)
 
 type Channel struct {
-	v1.TypeMeta `json:",inline"`
-	ObjectMeta  metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `json:",inline"`
+	ObjectMeta      metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec ChannelSpec `json:"spec,omitempty"`
 }
@@ -94,12 +94,12 @@ func LoadChannel(location string) (*Channel, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid base channel location: %q", DefaultChannelBase)
 		}
-		glog.V(4).Infof("resolving %q against default channel location %q", location, DefaultChannelBase)
+		klog.V(4).Infof("resolving %q against default channel location %q", location, DefaultChannelBase)
 		u = base.ResolveReference(u)
 	}
 
 	resolved := u.String()
-	glog.V(2).Infof("Loading channel from %q", resolved)
+	klog.V(2).Infof("Loading channel from %q", resolved)
 	channelBytes, err := vfs.Context.ReadFile(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("error reading channel %q: %v", resolved, err)
@@ -108,7 +108,7 @@ func LoadChannel(location string) (*Channel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing channel %q: %v", resolved, err)
 	}
-	glog.V(4).Infof("Channel contents: %s", string(channelBytes))
+	klog.V(4).Infof("Channel contents: %s", string(channelBytes))
 
 	return channel, nil
 }
@@ -127,7 +127,7 @@ func ParseChannel(channelBytes []byte) (*Channel, error) {
 // FindRecommendedUpgrade returns a string with a new version, if the current version is out of date
 func (v *KubernetesVersionSpec) FindRecommendedUpgrade(version semver.Version) (*semver.Version, error) {
 	if v.RecommendedVersion == "" {
-		glog.V(2).Infof("VersionRecommendationSpec does not specify RecommendedVersion")
+		klog.V(2).Infof("VersionRecommendationSpec does not specify RecommendedVersion")
 		return nil, nil
 	}
 
@@ -136,18 +136,17 @@ func (v *KubernetesVersionSpec) FindRecommendedUpgrade(version semver.Version) (
 		return nil, fmt.Errorf("error parsing RecommendedVersion %q from channel", v.RecommendedVersion)
 	}
 	if recommendedVersion.GT(version) {
-		glog.V(2).Infof("RecommendedVersion=%q, Have=%q.  Recommending upgrade", recommendedVersion, version)
+		klog.V(2).Infof("RecommendedVersion=%q, Have=%q.  Recommending upgrade", recommendedVersion, version)
 		return recommendedVersion, nil
-	} else {
-		glog.V(4).Infof("RecommendedVersion=%q, Have=%q.  No upgrade needed.", recommendedVersion, version)
 	}
+	klog.V(4).Infof("RecommendedVersion=%q, Have=%q.  No upgrade needed.", recommendedVersion, version)
 	return nil, nil
 }
 
 // FindRecommendedUpgrade returns a string with a new version, if the current version is out of date
 func (v *KopsVersionSpec) FindRecommendedUpgrade(version semver.Version) (*semver.Version, error) {
 	if v.RecommendedVersion == "" {
-		glog.V(2).Infof("VersionRecommendationSpec does not specify RecommendedVersion")
+		klog.V(2).Infof("VersionRecommendationSpec does not specify RecommendedVersion")
 		return nil, nil
 	}
 
@@ -156,18 +155,17 @@ func (v *KopsVersionSpec) FindRecommendedUpgrade(version semver.Version) (*semve
 		return nil, fmt.Errorf("error parsing RecommendedVersion %q from channel", v.RecommendedVersion)
 	}
 	if recommendedVersion.GT(version) {
-		glog.V(2).Infof("RecommendedVersion=%q, Have=%q.  Recommending upgrade", recommendedVersion, version)
+		klog.V(2).Infof("RecommendedVersion=%q, Have=%q.  Recommending upgrade", recommendedVersion, version)
 		return &recommendedVersion, nil
-	} else {
-		glog.V(4).Infof("RecommendedVersion=%q, Have=%q.  No upgrade needed.", recommendedVersion, version)
 	}
+	klog.V(4).Infof("RecommendedVersion=%q, Have=%q.  No upgrade needed.", recommendedVersion, version)
 	return nil, nil
 }
 
 // IsUpgradeRequired returns true if the current version is not acceptable
 func (v *KubernetesVersionSpec) IsUpgradeRequired(version semver.Version) (bool, error) {
 	if v.RequiredVersion == "" {
-		glog.V(2).Infof("VersionRecommendationSpec does not specify RequiredVersion")
+		klog.V(2).Infof("VersionRecommendationSpec does not specify RequiredVersion")
 		return false, nil
 	}
 
@@ -176,18 +174,17 @@ func (v *KubernetesVersionSpec) IsUpgradeRequired(version semver.Version) (bool,
 		return false, fmt.Errorf("error parsing RequiredVersion %q from channel", v.RequiredVersion)
 	}
 	if requiredVersion.GT(version) {
-		glog.V(2).Infof("RequiredVersion=%q, Have=%q.  Requiring upgrade", requiredVersion, version)
+		klog.V(2).Infof("RequiredVersion=%q, Have=%q.  Requiring upgrade", requiredVersion, version)
 		return true, nil
-	} else {
-		glog.V(4).Infof("RequiredVersion=%q, Have=%q.  No upgrade needed.", requiredVersion, version)
 	}
+	klog.V(4).Infof("RequiredVersion=%q, Have=%q.  No upgrade needed.", requiredVersion, version)
 	return false, nil
 }
 
 // IsUpgradeRequired returns true if the current version is not acceptable
 func (v *KopsVersionSpec) IsUpgradeRequired(version semver.Version) (bool, error) {
 	if v.RequiredVersion == "" {
-		glog.V(2).Infof("VersionRecommendationSpec does not specify RequiredVersion")
+		klog.V(2).Infof("VersionRecommendationSpec does not specify RequiredVersion")
 		return false, nil
 	}
 
@@ -196,11 +193,10 @@ func (v *KopsVersionSpec) IsUpgradeRequired(version semver.Version) (bool, error
 		return false, fmt.Errorf("error parsing RequiredVersion %q from channel", v.RequiredVersion)
 	}
 	if requiredVersion.GT(version) {
-		glog.V(2).Infof("RequiredVersion=%q, Have=%q.  Requiring upgrade", requiredVersion, version)
+		klog.V(2).Infof("RequiredVersion=%q, Have=%q.  Requiring upgrade", requiredVersion, version)
 		return true, nil
-	} else {
-		glog.V(4).Infof("RequiredVersion=%q, Have=%q.  No upgrade needed.", requiredVersion, version)
 	}
+	klog.V(4).Infof("RequiredVersion=%q, Have=%q.  No upgrade needed.", requiredVersion, version)
 	return false, nil
 }
 
@@ -211,11 +207,11 @@ func FindKubernetesVersionSpec(versions []KubernetesVersionSpec, version semver.
 		if v.Range != "" {
 			versionRange, err := semver.ParseRange(v.Range)
 			if err != nil {
-				glog.Warningf("unable to parse range in channel version spec: %q", v.Range)
+				klog.Warningf("unable to parse range in channel version spec: %q", v.Range)
 				continue
 			}
 			if !versionRange(version) {
-				glog.V(8).Infof("version range %q does not apply to version %q; skipping", v.Range, version)
+				klog.V(8).Infof("version range %q does not apply to version %q; skipping", v.Range, version)
 				continue
 			}
 		}
@@ -232,11 +228,11 @@ func FindKopsVersionSpec(versions []KopsVersionSpec, version semver.Version) *Ko
 		if v.Range != "" {
 			versionRange, err := semver.ParseRange(v.Range)
 			if err != nil {
-				glog.Warningf("unable to parse range in channel version spec: %q", v.Range)
+				klog.Warningf("unable to parse range in channel version spec: %q", v.Range)
 				continue
 			}
 			if !versionRange(version) {
-				glog.V(8).Infof("version range %q does not apply to version %q; skipping", v.Range, version)
+				klog.V(8).Infof("version range %q does not apply to version %q; skipping", v.Range, version)
 				continue
 			}
 		}
@@ -248,12 +244,15 @@ func FindKopsVersionSpec(versions []KopsVersionSpec, version semver.Version) *Ko
 
 type CloudProviderID string
 
-const CloudProviderAWS CloudProviderID = "aws"
-const CloudProviderBareMetal CloudProviderID = "baremetal"
-const CloudProviderGCE CloudProviderID = "gce"
-const CloudProviderDO CloudProviderID = "digitalocean"
-const CloudProviderVSphere CloudProviderID = "vsphere"
-const CloudProviderOpenstack CloudProviderID = "openstack"
+const (
+	CloudProviderALI       CloudProviderID = "alicloud"
+	CloudProviderAWS       CloudProviderID = "aws"
+	CloudProviderBareMetal CloudProviderID = "baremetal"
+	CloudProviderDO        CloudProviderID = "digitalocean"
+	CloudProviderGCE       CloudProviderID = "gce"
+	CloudProviderOpenstack CloudProviderID = "openstack"
+	CloudProviderVSphere   CloudProviderID = "vsphere"
+)
 
 // FindImage returns the image for the cloudprovider, or nil if none found
 func (c *Channel) FindImage(provider CloudProviderID, kubernetesVersion semver.Version) *ChannelImageSpec {
@@ -266,12 +265,12 @@ func (c *Channel) FindImage(provider CloudProviderID, kubernetesVersion semver.V
 		if image.KubernetesVersion != "" {
 			versionRange, err := semver.ParseRange(image.KubernetesVersion)
 			if err != nil {
-				glog.Warningf("cannot parse KubernetesVersion=%q", image.KubernetesVersion)
+				klog.Warningf("cannot parse KubernetesVersion=%q", image.KubernetesVersion)
 				continue
 			}
 
 			if !versionRange(kubernetesVersion) {
-				glog.V(2).Infof("Kubernetes version %q does not match range: %s", kubernetesVersion, image.KubernetesVersion)
+				klog.V(2).Infof("Kubernetes version %q does not match range: %s", kubernetesVersion, image.KubernetesVersion)
 				continue
 			}
 		}
@@ -279,12 +278,12 @@ func (c *Channel) FindImage(provider CloudProviderID, kubernetesVersion semver.V
 	}
 
 	if len(matches) == 0 {
-		glog.V(2).Infof("No matching images in channel for cloudprovider %q", provider)
+		klog.V(2).Infof("No matching images in channel for cloudprovider %q", provider)
 		return nil
 	}
 
 	if len(matches) != 1 {
-		glog.Warningf("Multiple matching images in channel for cloudprovider %q", provider)
+		klog.Warningf("Multiple matching images in channel for cloudprovider %q", provider)
 	}
 	return matches[0]
 }
@@ -294,14 +293,14 @@ func (c *Channel) FindImage(provider CloudProviderID, kubernetesVersion semver.V
 func RecommendedKubernetesVersion(c *Channel, kopsVersionString string) *semver.Version {
 	kopsVersion, err := semver.ParseTolerant(kopsVersionString)
 	if err != nil {
-		glog.Warningf("unable to parse kops version %q", kopsVersionString)
+		klog.Warningf("unable to parse kops version %q", kopsVersionString)
 	} else {
 		kopsVersionSpec := FindKopsVersionSpec(c.Spec.KopsVersions, kopsVersion)
 		if kopsVersionSpec != nil {
 			if kopsVersionSpec.KubernetesVersion != "" {
 				sv, err := util.ParseKubernetesVersion(kopsVersionSpec.KubernetesVersion)
 				if err != nil {
-					glog.Warningf("unable to parse kubernetes version %q", kopsVersionSpec.KubernetesVersion)
+					klog.Warningf("unable to parse kubernetes version %q", kopsVersionSpec.KubernetesVersion)
 				} else {
 					return sv
 				}
@@ -312,7 +311,7 @@ func RecommendedKubernetesVersion(c *Channel, kopsVersionString string) *semver.
 	if c.Spec.Cluster != nil {
 		sv, err := util.ParseKubernetesVersion(c.Spec.Cluster.KubernetesVersion)
 		if err != nil {
-			glog.Warningf("unable to parse kubernetes version %q", c.Spec.Cluster.KubernetesVersion)
+			klog.Warningf("unable to parse kubernetes version %q", c.Spec.Cluster.KubernetesVersion)
 		} else {
 			return sv
 		}

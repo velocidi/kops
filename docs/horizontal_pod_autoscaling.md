@@ -68,6 +68,7 @@ compatibility matrix is as follows:
 
 Metrics Server | Metrics API group/version | Supported Kubernetes version
 ---------------|---------------------------|-----------------------------
+0.3.x          | `metrics.k8s.io/v1beta1`  | 1.8+
 0.2.x          | `metrics.k8s.io/v1beta1`  | 1.8+
 0.1.x          | `metrics/v1alpha1`        | 1.7
 
@@ -80,6 +81,8 @@ spec:
   kubelet:
     enableCustomMetrics: true
 ```
+
+Note that the deprecated and inactive option '--enable-custom-metrics' has been removed in Kubernetes 1.11 [#60699](https://github.com/kubernetes/kubernetes/pull/60699)
 
 Enable the horizontal pod autoscaler REST client:
 

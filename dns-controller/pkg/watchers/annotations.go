@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,10 +16,12 @@ limitations under the License.
 
 package watchers
 
-// AnnotationNameDNSExternal is used to set up a DNS name for accessing the resource from outside the cluster
-// For a service of Type=LoadBalancer, it would map to the external LB hostname or IP
-const AnnotationNameDNSExternal = "dns.alpha.kubernetes.io/external"
+const (
+	// AnnotationNameDNSExternal is used to set up a DNS name for accessing the resource from outside the cluster
+	// For a service of Type=LoadBalancer, it would map to the external LB hostname or IP
+	AnnotationNameDNSExternal = "dns.alpha.kubernetes.io/external"
 
-// AnnotationNameDNSInternal is used to set up a DNS name for accessing the resource from inside the cluster
-// This is only supported on Pods currently, and maps to the Internal address
-const AnnotationNameDNSInternal = "dns.alpha.kubernetes.io/internal"
+	// AnnotationNameDNSInternal is used to set up a DNS name for accessing the resource from inside the cluster
+	// This is only supported on Pods currently, and maps to the Internal address
+	AnnotationNameDNSInternal = "dns.alpha.kubernetes.io/internal"
+)

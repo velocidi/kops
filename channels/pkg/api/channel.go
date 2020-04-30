@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,15 +17,16 @@ limitations under the License.
 package api
 
 import (
-	v1 "k8s.io/api/core/v1"
+	"fmt"
+
+	"github.com/blang/semver"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type Addons struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// We use v1.ObjectMeta so we don't serialize everything, even though we are using the full api machinery here (yet!)
-	ObjectMeta v1.ObjectMeta `json:"metadata,omitempty"`
+	ObjectMeta metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec AddonsSpec `json:"spec,omitempty"`
 }
@@ -48,6 +49,9 @@ type AddonSpec struct {
 	// Manifest is the URL to the manifest that should be applied
 	Manifest *string `json:"manifest,omitempty"`
 
+	// Manifesthash is the sha1 hash of our manifest
+	ManifestHash string `json:"manifestHash,omitempty"`
+
 	// KubernetesVersion is a semver version range on which this version of the addon can be applied
 	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
 
@@ -58,4 +62,22 @@ type AddonSpec struct {
 	// version of the software we are packaging.  But we always want to reinstall when we
 	// switch kubernetes versions.
 	Id string `json:"id,omitempty"`
+}
+
+func (a *Addons) Verify() error {
+	for _, addon := range a.Spec.Addons {
+		if addon != nil && addon.Version != nil && *addon.Version != "" {
+			name := a.ObjectMeta.Name
+			if addon.Name != nil {
+				name = *addon.Name
+			}
+
+			_, err := semver.ParseTolerant(*addon.Version)
+			if err != nil {
+				return fmt.Errorf("addon %q has unparseable version %q: %v", name, *addon.Version, err)
+			}
+		}
+	}
+
+	return nil
 }

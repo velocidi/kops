@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,10 +25,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/assets"
 	"k8s.io/kops/pkg/diff"
-	"k8s.io/kops/upup/pkg/fi/utils"
+	"k8s.io/kops/util/pkg/reflectutils"
 )
 
 // DryRunTarget is a special Target that does not execute anything, but instead tracks all changes.
@@ -69,7 +69,7 @@ type DeletionByTaskName []Deletion
 func (a DeletionByTaskName) Len() int      { return len(a) }
 func (a DeletionByTaskName) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 func (a DeletionByTaskName) Less(i, j int) bool {
-	return a[i].TaskName() < a[i].TaskName()
+	return a[i].TaskName() < a[j].TaskName()
 }
 
 var _ Target = &DryRunTarget{}
@@ -122,7 +122,7 @@ func idForTask(taskMap map[string]Task, t Task) string {
 			return k
 		}
 	}
-	glog.Fatalf("unknown task: %v", t)
+	klog.Fatalf("unknown task: %v", t)
 	return "?"
 }
 
@@ -167,7 +167,7 @@ func (t *DryRunTarget) PrintReport(taskMap map[string]Task, out io.Writer) error
 							continue
 						}
 
-						fieldValue := ValueAsString(field)
+						fieldValue := reflectutils.ValueAsString(field)
 
 						shouldPrint := true
 						if fieldName == "Name" {
@@ -252,19 +252,19 @@ func (t *DryRunTarget) PrintReport(taskMap map[string]Task, out io.Writer) error
 	}
 
 	if len(t.assetBuilder.ContainerAssets) != 0 {
-		glog.V(4).Infof("ContainerAssets:")
+		klog.V(4).Infof("ContainerAssets:")
 		for _, a := range t.assetBuilder.ContainerAssets {
-			glog.V(4).Infof("  %s %s", a.DockerImage, a.CanonicalLocation)
+			klog.V(4).Infof("  %s %s", a.DockerImage, a.CanonicalLocation)
 		}
 	}
 
 	if len(t.assetBuilder.FileAssets) != 0 {
-		glog.V(4).Infof("FileAssets:")
+		klog.V(4).Infof("FileAssets:")
 		for _, a := range t.assetBuilder.FileAssets {
-			if a.FileURL != nil && a.CanonicalFileURL != nil {
-				glog.V(4).Infof("  %s %s", a.FileURL.String(), a.CanonicalFileURL.String())
-			} else if a.FileURL != nil {
-				glog.V(4).Infof("  %s", a.FileURL.String())
+			if a.DownloadURL != nil && a.CanonicalURL != nil {
+				klog.V(4).Infof("  %s %s", a.DownloadURL.String(), a.CanonicalURL.String())
+			} else if a.DownloadURL != nil {
+				klog.V(4).Infof("  %s", a.DownloadURL.String())
 			}
 		}
 	}
@@ -338,7 +338,7 @@ func buildChangeList(a, e, changes Task) ([]change, error) {
 				}
 
 				if !ignored && description == "" {
-					description = fmt.Sprintf(" %v -> %v", ValueAsString(fieldValA), ValueAsString(fieldValE))
+					description = fmt.Sprintf(" %v -> %v", reflectutils.ValueAsString(fieldValA), reflectutils.ValueAsString(fieldValE))
 				}
 			}
 			if ignored {
@@ -373,7 +373,7 @@ func tryResourceAsString(v reflect.Value) (string, bool) {
 	if res, ok := intf.(Resource); ok {
 		s, err := ResourceAsString(res)
 		if err != nil {
-			glog.Warningf("error converting to resource: %v", err)
+			klog.Warningf("error converting to resource: %v", err)
 			return "", false
 		}
 		return s, true
@@ -381,7 +381,7 @@ func tryResourceAsString(v reflect.Value) (string, bool) {
 	if res, ok := intf.(*ResourceHolder); ok {
 		s, err := res.AsString()
 		if err != nil {
-			glog.Warningf("error converting to resource: %v", err)
+			klog.Warningf("error converting to resource: %v", err)
 			return "", false
 		}
 		return s, true
@@ -398,107 +398,32 @@ func getTaskName(t Task) string {
 	return s
 }
 
-// ValueAsString returns a human-readable string representation of the passed value
-func ValueAsString(value reflect.Value) string {
-	b := &bytes.Buffer{}
-
-	walker := func(path string, field *reflect.StructField, v reflect.Value) error {
-		if utils.IsPrimitiveValue(v) || v.Kind() == reflect.String {
-			fmt.Fprintf(b, "%v", v.Interface())
-			return utils.SkipReflection
-		}
-
-		switch v.Kind() {
-		case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map:
-			if v.IsNil() {
-				fmt.Fprintf(b, "<nil>")
-				return utils.SkipReflection
-			}
-		}
-
-		switch v.Kind() {
-		case reflect.Ptr, reflect.Interface:
-			return nil // descend into value
-
-		case reflect.Slice:
-			len := v.Len()
-			fmt.Fprintf(b, "[")
-			for i := 0; i < len; i++ {
-				av := v.Index(i)
-
-				if i != 0 {
-					fmt.Fprintf(b, ", ")
-				}
-				fmt.Fprintf(b, "%s", ValueAsString(av))
-			}
-			fmt.Fprintf(b, "]")
-			return utils.SkipReflection
-
-		case reflect.Map:
-			keys := v.MapKeys()
-			fmt.Fprintf(b, "{")
-			for i, key := range keys {
-				mv := v.MapIndex(key)
-
-				if i != 0 {
-					fmt.Fprintf(b, ", ")
-				}
-				fmt.Fprintf(b, "%s: %s", ValueAsString(key), ValueAsString(mv))
-			}
-			fmt.Fprintf(b, "}")
-			return utils.SkipReflection
-
-		case reflect.Struct:
-			intf := v.Addr().Interface()
-			if _, ok := intf.(Resource); ok {
-				fmt.Fprintf(b, "<resource>")
-			} else if _, ok := intf.(*ResourceHolder); ok {
-				fmt.Fprintf(b, "<resource>")
-			} else if compareWithID, ok := intf.(CompareWithID); ok {
-				id := compareWithID.CompareWithID()
-				name := ""
-				hasName, ok := intf.(HasName)
-				if ok {
-					name = StringValue(hasName.GetName())
-				}
-				if id == nil {
-					// Uninformative, but we can often print the name instead
-					if name != "" {
-						fmt.Fprintf(b, "name:%s", name)
-					} else {
-						fmt.Fprintf(b, "id:<nil>")
-					}
-				} else {
-					// Uninformative, but we can often print the name instead
-					if name != "" {
-						fmt.Fprintf(b, "name:%s id:%s", name, *id)
-					} else {
-						fmt.Fprintf(b, "id:%s", *id)
-					}
-
-				}
-			} else {
-				glog.V(4).Infof("Unhandled kind in asString for %q: %T", path, v.Interface())
-				fmt.Fprint(b, DebugAsJsonString(intf))
-			}
-			return utils.SkipReflection
-
-		default:
-			glog.Infof("Unhandled kind in asString for %q: %T", path, v.Interface())
-			return fmt.Errorf("Unhandled kind for %q: %v", path, v.Kind())
-		}
-	}
-
-	err := utils.ReflectRecursive(value, walker)
-	if err != nil {
-		glog.Fatalf("unexpected error during reflective walk: %v", err)
-	}
-	return b.String()
-}
-
 // Finish is called at the end of a run, and prints a list of changes to the configured Writer
 func (t *DryRunTarget) Finish(taskMap map[string]Task) error {
 	return t.PrintReport(taskMap, t.out)
+}
+
+// Deletions returns all task names which is going to be deleted
+func (t *DryRunTarget) Deletions() []string {
+	var deletions []string
+	for _, d := range t.deletions {
+		deletions = append(deletions, d.TaskName())
+	}
+	return deletions
+}
+
+// Changes returns tasks which is going to be created or updated
+func (t *DryRunTarget) Changes() (map[string]Task, map[string]Task) {
+	creates := make(map[string]Task)
+	updates := make(map[string]Task)
+	for _, r := range t.changes {
+		if r.aIsNil {
+			creates[getTaskName(r.changes)] = r.changes
+		} else {
+			updates[getTaskName(r.changes)] = r.changes
+		}
+	}
+	return creates, updates
 }
 
 // HasChanges returns true iff any changes would have been made

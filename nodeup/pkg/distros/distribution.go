@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,20 +17,27 @@ limitations under the License.
 package distros
 
 import (
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi/nodeup/tags"
 )
 
 type Distribution string
 
 var (
-	DistributionJessie      Distribution = "jessie"
-	DistributionDebian9     Distribution = "debian9"
-	DistributionXenial      Distribution = "xenial"
-	DistributionRhel7       Distribution = "rhel7"
-	DistributionCentos7     Distribution = "centos7"
-	DistributionCoreOS      Distribution = "coreos"
-	DistributionContainerOS Distribution = "containeros"
+	DistributionJessie       Distribution = "jessie"
+	DistributionDebian9      Distribution = "debian9"
+	DistributionDebian10     Distribution = "buster"
+	DistributionXenial       Distribution = "xenial"
+	DistributionBionic       Distribution = "bionic"
+	DistributionFocal        Distribution = "focal"
+	DistributionAmazonLinux2 Distribution = "amazonlinux2"
+	DistributionRhel7        Distribution = "rhel7"
+	DistributionCentos7      Distribution = "centos7"
+	DistributionRhel8        Distribution = "rhel8"
+	DistributionCentos8      Distribution = "centos8"
+	DistributionCoreOS       Distribution = "coreos"
+	DistributionFlatcar      Distribution = "flatcar"
+	DistributionContainerOS  Distribution = "containeros"
 )
 
 func (d Distribution) BuildTags() []string {
@@ -39,20 +46,32 @@ func (d Distribution) BuildTags() []string {
 	switch d {
 	case DistributionJessie:
 		t = []string{"_jessie"}
-	case DistributionDebian9:
+	case DistributionDebian9, DistributionDebian10:
 		t = []string{} // trying to move away from tags
 	case DistributionXenial:
 		t = []string{"_xenial"}
+	case DistributionBionic:
+		t = []string{"_bionic"}
+	case DistributionFocal:
+		t = []string{"_focal"}
+	case DistributionAmazonLinux2:
+		t = []string{"_amazonlinux2"}
 	case DistributionCentos7:
 		t = []string{"_centos7"}
 	case DistributionRhel7:
 		t = []string{"_rhel7"}
+	case DistributionCentos8:
+		t = []string{"_centos8"}
+	case DistributionRhel8:
+		t = []string{"_rhel8"}
 	case DistributionCoreOS:
 		t = []string{"_coreos"}
+	case DistributionFlatcar:
+		t = []string{"_flatcar"}
 	case DistributionContainerOS:
 		t = []string{"_containeros"}
 	default:
-		glog.Fatalf("unknown distribution: %s", d)
+		klog.Fatalf("unknown distribution: %s", d)
 		return nil
 	}
 
@@ -71,44 +90,62 @@ func (d Distribution) BuildTags() []string {
 
 func (d Distribution) IsDebianFamily() bool {
 	switch d {
-	case DistributionJessie, DistributionXenial, DistributionDebian9:
+	case DistributionJessie, DistributionDebian9, DistributionDebian10:
 		return true
-	case DistributionCentos7, DistributionRhel7:
+	case DistributionXenial, DistributionBionic, DistributionFocal:
+		return true
+	case DistributionCentos7, DistributionRhel7, DistributionCentos8, DistributionRhel8, DistributionAmazonLinux2:
 		return false
-	case DistributionCoreOS, DistributionContainerOS:
+	case DistributionCoreOS, DistributionFlatcar, DistributionContainerOS:
 		return false
 	default:
-		glog.Fatalf("unknown distribution: %s", d)
+		klog.Fatalf("unknown distribution: %s", d)
+		return false
+	}
+}
+
+func (d Distribution) IsUbuntu() bool {
+	switch d {
+	case DistributionJessie, DistributionDebian9, DistributionDebian10:
+		return false
+	case DistributionXenial, DistributionBionic, DistributionFocal:
+		return true
+	case DistributionCentos7, DistributionRhel7, DistributionCentos8, DistributionRhel8, DistributionAmazonLinux2:
+		return false
+	case DistributionCoreOS, DistributionFlatcar, DistributionContainerOS:
+		return false
+	default:
+		klog.Fatalf("unknown distribution: %s", d)
 		return false
 	}
 }
 
 func (d Distribution) IsRHELFamily() bool {
 	switch d {
-	case DistributionCentos7, DistributionRhel7:
+	case DistributionCentos7, DistributionRhel7, DistributionCentos8, DistributionRhel8, DistributionAmazonLinux2:
 		return true
-	case DistributionJessie, DistributionXenial, DistributionDebian9:
+	case DistributionJessie, DistributionXenial, DistributionBionic, DistributionFocal, DistributionDebian9, DistributionDebian10:
 		return false
-	case DistributionCoreOS, DistributionContainerOS:
+	case DistributionCoreOS, DistributionFlatcar, DistributionContainerOS:
 		return false
 	default:
-		glog.Fatalf("unknown distribution: %s", d)
+		klog.Fatalf("unknown distribution: %s", d)
 		return false
 	}
 }
 
 func (d Distribution) IsSystemd() bool {
 	switch d {
-	case DistributionJessie, DistributionXenial, DistributionDebian9:
+	case DistributionJessie, DistributionXenial, DistributionBionic, DistributionFocal, DistributionDebian9, DistributionDebian10:
 		return true
-	case DistributionCentos7, DistributionRhel7:
+	case DistributionCentos7, DistributionRhel7, DistributionCentos8, DistributionRhel8, DistributionAmazonLinux2:
 		return true
-	case DistributionCoreOS:
+	case DistributionCoreOS, DistributionFlatcar:
 		return true
 	case DistributionContainerOS:
 		return true
 	default:
-		glog.Fatalf("unknown distribution: %s", d)
+		klog.Fatalf("unknown distribution: %s", d)
 		return false
 	}
 }

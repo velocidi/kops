@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,4 +37,15 @@ func GetUniqueStrings(main, extra []string) []string {
 	}
 
 	return unique
+}
+
+// Contains checks if a slice contains an element
+func Contains(list []string, e string) bool {
+	for _, x := range list {
+		if x == e {
+			return true
+		}
+	}
+
+	return false
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,14 +20,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/iam"
-	"github.com/golang/glog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/iam"
+	"k8s.io/klog"
 )
 
 //go:generate fitask -type=IAMInstanceProfile
@@ -35,7 +36,8 @@ type IAMInstanceProfile struct {
 	Name      *string
 	Lifecycle *fi.Lifecycle
 
-	ID *string
+	ID     *string
+	Shared *bool
 }
 
 var _ fi.CompareWithID = &IAMInstanceProfile{}
@@ -85,6 +87,7 @@ func (e *IAMInstanceProfile) Find(c *fi.Context) (*IAMInstanceProfile, error) {
 
 	// Avoid spurious changes
 	actual.Lifecycle = e.Lifecycle
+	actual.Shared = e.Shared
 
 	return actual, nil
 }
@@ -95,7 +98,7 @@ func (e *IAMInstanceProfile) Run(c *fi.Context) error {
 
 func (s *IAMInstanceProfile) CheckChanges(a, e, changes *IAMInstanceProfile) error {
 	if a != nil {
-		if fi.StringValue(e.Name) == "" {
+		if fi.StringValue(e.Name) == "" && !fi.BoolValue(e.Shared) {
 			return fi.RequiredField("Name")
 		}
 	}
@@ -103,8 +106,12 @@ func (s *IAMInstanceProfile) CheckChanges(a, e, changes *IAMInstanceProfile) err
 }
 
 func (_ *IAMInstanceProfile) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *IAMInstanceProfile) error {
-	if a == nil {
-		glog.V(2).Infof("Creating IAMInstanceProfile with Name:%q", *e.Name)
+	if fi.BoolValue(e.Shared) {
+		if a == nil {
+			return fmt.Errorf("instance role profile with id %q not found", fi.StringValue(e.ID))
+		}
+	} else if a == nil {
+		klog.V(2).Infof("Creating IAMInstanceProfile with Name:%q", *e.Name)
 
 		request := &iam.CreateInstanceProfileInput{
 			InstanceProfileName: e.Name,
@@ -123,18 +130,18 @@ func (_ *IAMInstanceProfile) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *IAM
 		attempt := 0
 		for {
 			if attempt > 10 {
-				glog.Warningf("unable to retrieve newly-created IAM instance profile %q; timed out", *e.Name)
+				klog.Warningf("unable to retrieve newly-created IAM instance profile %q; timed out", *e.Name)
 				break
 			}
 
 			ip, err := findIAMInstanceProfile(t.Cloud, *e.Name)
 			if err != nil {
-				glog.Warningf("ignoring error while retrieving newly-created IAM instance profile %q: %v", *e.Name, err)
+				klog.Warningf("ignoring error while retrieving newly-created IAM instance profile %q: %v", *e.Name, err)
 			}
 
 			if ip != nil {
 				// Found
-				glog.V(4).Infof("Found IAM instance profile %q", *e.Name)
+				klog.V(4).Infof("Found IAM instance profile %q", *e.Name)
 				break
 			}
 
@@ -154,6 +161,9 @@ func (_ *IAMInstanceProfile) RenderTerraform(t *terraform.TerraformTarget, a, e,
 }
 
 func (e *IAMInstanceProfile) TerraformLink() *terraform.Literal {
+	if fi.BoolValue(e.Shared) {
+		return terraform.LiteralFromStringValue(fi.StringValue(e.Name))
+	}
 	return terraform.LiteralProperty("aws_iam_instance_profile", *e.Name, "id")
 }
 
@@ -163,5 +173,8 @@ func (_ *IAMInstanceProfile) RenderCloudformation(t *cloudformation.Cloudformati
 }
 
 func (e *IAMInstanceProfile) CloudformationLink() *cloudformation.Literal {
-	return cloudformation.Ref("AWS::IAM::InstanceProfile", *e.Name)
+	if fi.BoolValue(e.Shared) {
+		return cloudformation.LiteralString(fi.StringValue(e.Name))
+	}
+	return cloudformation.Ref("AWS::IAM::InstanceProfile", fi.StringValue(e.Name))
 }

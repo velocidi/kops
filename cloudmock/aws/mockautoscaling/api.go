@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,8 +24,10 @@ import (
 )
 
 type MockAutoscaling struct {
-	mutex sync.Mutex
+	// Mock out interface
+	autoscalingiface.AutoScalingAPI
 
+	mutex                sync.Mutex
 	Groups               map[string]*autoscaling.Group
 	LaunchConfigurations map[string]*autoscaling.LaunchConfiguration
 }

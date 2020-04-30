@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"k8s.io/kops/upup/pkg/fi/utils"
+	"k8s.io/kops/util/pkg/reflectutils"
 )
 
 // DefaultDeltaRunMethod implements the standard change-based run procedure:
@@ -108,7 +108,7 @@ func DefaultDeltaRunMethod(e Task, c *Context) error {
 
 // invokeCheckChanges calls the checkChanges method by reflection
 func invokeCheckChanges(a, e, changes Task) error {
-	rv, err := utils.InvokeMethod(e, "CheckChanges", a, e, changes)
+	rv, err := reflectutils.InvokeMethod(e, "CheckChanges", a, e, changes)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func invokeCheckChanges(a, e, changes Task) error {
 
 // invokeFind calls the find method by reflection
 func invokeFind(e Task, c *Context) (Task, error) {
-	rv, err := utils.InvokeMethod(e, "Find", c)
+	rv, err := reflectutils.InvokeMethod(e, "Find", c)
 	if err != nil {
 		return nil, err
 	}
@@ -136,9 +136,9 @@ func invokeFind(e Task, c *Context) (Task, error) {
 
 // invokeShouldCreate calls the ShouldCreate method by reflection, if it exists
 func invokeShouldCreate(a, e, changes Task) (bool, error) {
-	rv, err := utils.InvokeMethod(e, "ShouldCreate", a, e, changes)
+	rv, err := reflectutils.InvokeMethod(e, "ShouldCreate", a, e, changes)
 	if err != nil {
-		if utils.IsMethodNotFound(err) {
+		if reflectutils.IsMethodNotFound(err) {
 			return true, nil
 		}
 		return false, err

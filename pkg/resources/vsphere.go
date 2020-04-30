@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ package resources
 import (
 	"context"
 
-	"github.com/golang/glog"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/vsphere"
 )
@@ -75,7 +75,7 @@ func (d *clusterDiscoveryVSphere) listVMs() ([]*Resource, error) {
 		if _, ok := err.(*find.NotFoundError); !ok {
 			return nil, err
 		}
-		glog.Warning(err)
+		klog.Warning(err)
 	}
 
 	var trackers []*Resource
@@ -113,7 +113,7 @@ func deleteVM(cloud fi.Cloud, r *Resource) error {
 
 	err = task.Wait(context.TODO())
 	if err != nil {
-		glog.Fatalf("Destroy VM failed: %q", err)
+		klog.Fatalf("Destroy VM failed: %q", err)
 	}
 
 	return nil

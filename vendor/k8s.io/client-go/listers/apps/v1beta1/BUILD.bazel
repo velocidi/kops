@@ -6,11 +6,10 @@ go_library(
         "controllerrevision.go",
         "deployment.go",
         "expansion_generated.go",
-        "scale.go",
         "statefulset.go",
         "statefulset_expansion.go",
     ],
-    importmap = "vendor/k8s.io/client-go/listers/apps/v1beta1",
+    importmap = "k8s.io/kops/vendor/k8s.io/client-go/listers/apps/v1beta1",
     importpath = "k8s.io/client-go/listers/apps/v1beta1",
     visibility = ["//visibility:public"],
     deps = [

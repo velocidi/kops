@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/route53"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/dnsprovider/pkg/dnsprovider"
 )
 
@@ -50,7 +50,7 @@ func route53HandlerLogger(req *request.Request) {
 		name = req.Operation.Name
 	}
 
-	glog.V(4).Infof("AWS request: %s %s", service, name)
+	klog.V(4).Infof("AWS request: %s %s", service, name)
 }
 
 // newRoute53 creates a new instance of an AWS Route53 DNS Interface.
@@ -63,7 +63,11 @@ func newRoute53(config io.Reader) (*Interface, error) {
 	// e.g. https://github.com/kubernetes/kops/issues/605
 	awsConfig = awsConfig.WithCredentialsChainVerboseErrors(true)
 
-	svc := route53.New(session.New(), awsConfig)
+	sess, err := session.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	svc := route53.New(sess, awsConfig)
 
 	// Add our handler that will log requests
 	svc.Handlers.Sign.PushFrontNamed(request.NamedHandler{

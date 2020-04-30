@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/kops/cmd/kops/util"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 )
 
 var (
@@ -31,8 +31,8 @@ var (
 
 	1. All k8s masters are running and have "Ready" status.
 	2. All k8s nodes are running and have "Ready" status.
-	3. Componentstatues returns healthly for all components.
-	4. All pods in the kube-system namespace are running and healthy.
+	3. Component status returns healthy for all components.
+	4. All pods with a critical priority are running and healthy.
 	`))
 
 	validateExample = templates.Examples(i18n.T(`

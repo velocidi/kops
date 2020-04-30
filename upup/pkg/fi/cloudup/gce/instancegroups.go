@@ -17,16 +17,15 @@ limitations under the License.
 package gce
 
 import (
+	"context"
 	"encoding/base32"
 	"fmt"
 	"hash/fnv"
-	"strconv"
 	"strings"
 
-	"github.com/golang/glog"
-	context "golang.org/x/net/context"
-	compute "google.golang.org/api/compute/v0.beta"
-	"k8s.io/api/core/v1"
+	compute "google.golang.org/api/compute/v1"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/cloudinstances"
 )
@@ -62,11 +61,23 @@ func (c *mockGCECloud) DeleteInstance(i *cloudinstances.CloudInstanceGroupMember
 	return recreateCloudInstanceGroupMember(c, i)
 }
 
+// DetachInstance is not implemented yet. It needs to cause a cloud instance to no longer be counted against the group's size limits.
+func (c *gceCloudImplementation) DetachInstance(i *cloudinstances.CloudInstanceGroupMember) error {
+	klog.V(8).Info("gce cloud provider DetachInstance not implemented yet")
+	return fmt.Errorf("gce cloud provider does not support surging")
+}
+
+// DetachInstance is not implemented yet. It needs to cause a cloud instance to no longer be counted against the group's size limits.
+func (c *mockGCECloud) DetachInstance(i *cloudinstances.CloudInstanceGroupMember) error {
+	klog.V(8).Info("gce cloud provider DetachInstance not implemented yet")
+	return fmt.Errorf("gce cloud provider does not support surging")
+}
+
 // recreateCloudInstanceGroupMember recreates the specified instances, managed by an InstanceGroupManager
 func recreateCloudInstanceGroupMember(c GCECloud, i *cloudinstances.CloudInstanceGroupMember) error {
 	mig := i.CloudInstanceGroup.Raw.(*compute.InstanceGroupManager)
 
-	glog.V(2).Infof("Recreating GCE Instance %s in MIG %s", i.ID, mig.Name)
+	klog.V(2).Infof("Recreating GCE Instance %s in MIG %s", i.ID, mig.Name)
 
 	migURL, err := ParseGoogleCloudURL(mig.SelfLink)
 	if err != nil {
@@ -81,7 +92,7 @@ func recreateCloudInstanceGroupMember(c GCECloud, i *cloudinstances.CloudInstanc
 	op, err := c.Compute().InstanceGroupManagers.RecreateInstances(migURL.Project, migURL.Zone, migURL.Name, req).Do()
 	if err != nil {
 		if IsNotFound(err) {
-			glog.Infof("Instance not found, assuming deleted: %q", i.ID)
+			klog.Infof("Instance not found, assuming deleted: %q", i.ID)
 			return nil
 		}
 		return fmt.Errorf("error recreating Instance %s: %v", i.ID, err)
@@ -100,7 +111,13 @@ func getCloudGroups(c GCECloud, cluster *kops.Cluster, instancegroups []*kops.In
 
 	project := c.Project()
 	ctx := context.Background()
-	nodesByExternalID := cloudinstances.GetNodeMap(nodes)
+
+	nodesByProviderID := make(map[string]*v1.Node)
+
+	for i := range nodes {
+		node := &nodes[i]
+		nodesByProviderID[node.Spec.ProviderID] = node
+	}
 
 	// There is some code duplication with resources/gce.go here, but more in the structure than a straight copy-paste
 
@@ -133,7 +150,7 @@ func getCloudGroups(c GCECloud, cluster *kops.Cluster, instancegroups []*kops.In
 
 				instanceTemplate := instanceTemplates[mig.InstanceTemplate]
 				if instanceTemplate == nil {
-					glog.V(2).Infof("ignoring MIG %s with unmanaged InstanceTemplate: %s", name, mig.InstanceTemplate)
+					klog.V(2).Infof("ignoring MIG %s with unmanaged InstanceTemplate: %s", name, mig.InstanceTemplate)
 					continue
 				}
 
@@ -143,7 +160,7 @@ func getCloudGroups(c GCECloud, cluster *kops.Cluster, instancegroups []*kops.In
 				}
 				if ig == nil {
 					if warnUnmatched {
-						glog.Warningf("Found MIG with no corresponding instance group %q", name)
+						klog.Warningf("Found MIG with no corresponding instance group %q", name)
 					}
 					continue
 				}
@@ -171,11 +188,15 @@ func getCloudGroups(c GCECloud, cluster *kops.Cluster, instancegroups []*kops.In
 						CloudInstanceGroup: g,
 					}
 
-					node := nodesByExternalID[strconv.FormatUint(i.Id, 10)]
+					// Try first by provider ID
+					name := LastComponent(id)
+					providerID := "gce://" + project + "/" + zoneName + "/" + name
+					node := nodesByProviderID[providerID]
+
 					if node != nil {
 						cm.Node = node
 					} else {
-						glog.V(8).Infof("unable to find node for instance: %s", id)
+						klog.V(8).Infof("unable to find node for instance: %s", id)
 					}
 
 					if i.Version != nil && latestInstanceTemplate == i.Version.InstanceTemplate {
@@ -218,7 +239,7 @@ func LimitedLengthName(s string, n int) string {
 
 	h := fnv.New32a()
 	if _, err := h.Write([]byte(s)); err != nil {
-		glog.Fatalf("error hashing values: %v", err)
+		klog.Fatalf("error hashing values: %v", err)
 	}
 	hashString := base32.HexEncoding.EncodeToString(h.Sum(nil))
 	hashString = strings.ToLower(hashString)

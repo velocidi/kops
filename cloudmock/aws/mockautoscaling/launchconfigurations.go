@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,31 +23,34 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 func (m *MockAutoscaling) DescribeLaunchConfigurations(*autoscaling.DescribeLaunchConfigurationsInput) (*autoscaling.DescribeLaunchConfigurationsOutput, error) {
-	glog.Fatalf("Not implemented")
+	klog.Fatalf("Not implemented")
 	return nil, nil
 }
 func (m *MockAutoscaling) DescribeLaunchConfigurationsWithContext(aws.Context, *autoscaling.DescribeLaunchConfigurationsInput, ...request.Option) (*autoscaling.DescribeLaunchConfigurationsOutput, error) {
-	glog.Fatalf("Not implemented")
+	klog.Fatalf("Not implemented")
 	return nil, nil
 }
 func (m *MockAutoscaling) DescribeLaunchConfigurationsRequest(*autoscaling.DescribeLaunchConfigurationsInput) (*request.Request, *autoscaling.DescribeLaunchConfigurationsOutput) {
-	glog.Fatalf("Not implemented")
+	klog.Fatalf("Not implemented")
 	return nil, nil
 }
 
 func (m *MockAutoscaling) DescribeLaunchConfigurationsPages(request *autoscaling.DescribeLaunchConfigurationsInput, callback func(*autoscaling.DescribeLaunchConfigurationsOutput, bool) bool) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
 	if request.LaunchConfigurationNames != nil {
-		glog.Fatalf("LaunchConfigurationNames not implemented")
+		klog.Fatalf("LaunchConfigurationNames not implemented")
 	}
 	if request.MaxRecords != nil {
-		glog.Fatalf("MaxRecords not implemented")
+		klog.Fatalf("MaxRecords not implemented")
 	}
 	if request.NextToken != nil {
-		glog.Fatalf("NextToken not implemented")
+		klog.Fatalf("NextToken not implemented")
 	}
 
 	// For the mock, we just send everything in one page
@@ -62,12 +65,15 @@ func (m *MockAutoscaling) DescribeLaunchConfigurationsPages(request *autoscaling
 	return nil
 }
 func (m *MockAutoscaling) DescribeLaunchConfigurationsPagesWithContext(aws.Context, *autoscaling.DescribeLaunchConfigurationsInput, func(*autoscaling.DescribeLaunchConfigurationsOutput, bool) bool, ...request.Option) error {
-	glog.Fatalf("Not implemented")
+	klog.Fatalf("Not implemented")
 	return nil
 }
 
 func (m *MockAutoscaling) CreateLaunchConfiguration(request *autoscaling.CreateLaunchConfigurationInput) (*autoscaling.CreateLaunchConfigurationOutput, error) {
-	glog.Infof("CreateLaunchConfiguration: %v", request)
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	klog.Infof("CreateLaunchConfiguration: %v", request)
 
 	createdTime := time.Now().UTC()
 	lc := &autoscaling.LaunchConfiguration{
@@ -95,16 +101,19 @@ func (m *MockAutoscaling) CreateLaunchConfiguration(request *autoscaling.CreateL
 	if m.LaunchConfigurations == nil {
 		m.LaunchConfigurations = make(map[string]*autoscaling.LaunchConfiguration)
 	}
+	if m.LaunchConfigurations[*lc.LaunchConfigurationName] != nil {
+		return nil, fmt.Errorf("duplicate LaunchConfigurationName %s", *lc.LaunchConfigurationName)
+	}
 	m.LaunchConfigurations[*lc.LaunchConfigurationName] = lc
 
 	return &autoscaling.CreateLaunchConfigurationOutput{}, nil
 }
 func (m *MockAutoscaling) CreateLaunchConfigurationWithContext(aws.Context, *autoscaling.CreateLaunchConfigurationInput, ...request.Option) (*autoscaling.CreateLaunchConfigurationOutput, error) {
-	glog.Fatalf("Not implemented")
+	klog.Fatalf("Not implemented")
 	return nil, nil
 }
 func (m *MockAutoscaling) CreateLaunchConfigurationRequest(*autoscaling.CreateLaunchConfigurationInput) (*request.Request, *autoscaling.CreateLaunchConfigurationOutput) {
-	glog.Fatalf("Not implemented")
+	klog.Fatalf("Not implemented")
 	return nil, nil
 }
 
@@ -112,7 +121,7 @@ func (m *MockAutoscaling) DeleteLaunchConfiguration(request *autoscaling.DeleteL
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DeleteLaunchConfiguration: %v", request)
+	klog.Infof("DeleteLaunchConfiguration: %v", request)
 
 	id := aws.StringValue(request.LaunchConfigurationName)
 	o := m.LaunchConfigurations[id]
@@ -125,10 +134,10 @@ func (m *MockAutoscaling) DeleteLaunchConfiguration(request *autoscaling.DeleteL
 }
 
 func (m *MockAutoscaling) DeleteLaunchConfigurationWithContext(aws.Context, *autoscaling.DeleteLaunchConfigurationInput, ...request.Option) (*autoscaling.DeleteLaunchConfigurationOutput, error) {
-	glog.Fatalf("Not implemented")
+	klog.Fatalf("Not implemented")
 	return nil, nil
 }
 func (m *MockAutoscaling) DeleteLaunchConfigurationRequest(*autoscaling.DeleteLaunchConfigurationInput) (*request.Request, *autoscaling.DeleteLaunchConfigurationOutput) {
-	glog.Fatalf("Not implemented")
+	klog.Fatalf("Not implemented")
 	return nil, nil
 }

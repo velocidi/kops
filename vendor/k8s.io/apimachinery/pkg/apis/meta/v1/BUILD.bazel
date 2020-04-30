@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "controller_ref.go",
         "conversion.go",
+        "deepcopy.go",
         "doc.go",
         "duration.go",
         "generated.pb.go",
@@ -20,10 +21,11 @@ go_library(
         "types.go",
         "types_swagger_doc_generated.go",
         "watch.go",
+        "zz_generated.conversion.go",
         "zz_generated.deepcopy.go",
         "zz_generated.defaults.go",
     ],
-    importmap = "vendor/k8s.io/apimachinery/pkg/apis/meta/v1",
+    importmap = "k8s.io/kops/vendor/k8s.io/apimachinery/pkg/apis/meta/v1",
     importpath = "k8s.io/apimachinery/pkg/apis/meta/v1",
     visibility = ["//visibility:public"],
     deps = [
@@ -39,6 +41,7 @@ go_library(
         "//vendor/k8s.io/apimachinery/pkg/selection:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/types:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/util/intstr:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/runtime:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/watch:go_default_library",
     ],
 )

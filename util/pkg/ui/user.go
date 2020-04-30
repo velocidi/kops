@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,13 +26,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-// ConfirmArgs encapsulates the arguments that can he passed to GetConfirm
+// ConfirmArgs encapsulates the arguments that can be passed to GetConfirm
 type ConfirmArgs struct {
 	Out        io.Writer // os.Stdout or &bytes.Buffer used to output the message above the confirmation
 	Message    string    // what you want to say to the user before confirming
 	Default    string    // if you hit enter instead of yes or no should it approve or deny
 	TestVal    string    // if you need to test without the interactive prompt then set the user response here
-	Retries    int       // how many tines to ask for a valid confirmation before giving up
+	Retries    int       // how many times to ask for a valid confirmation before giving up
 	retryCount int       // how many attempts have been made
 }
 
@@ -49,7 +49,7 @@ func GetConfirm(c *ConfirmArgs) (bool, error) {
 
 	for {
 		answerTemplate := " (%s/%s)"
-		message := c.Message
+		var message string
 		switch c.Default {
 		case "yes", "y":
 			message = c.Message + fmt.Sprintf(answerTemplate, "Y", "n")
@@ -59,7 +59,6 @@ func GetConfirm(c *ConfirmArgs) (bool, error) {
 			message = c.Message + fmt.Sprintf(answerTemplate, "y", "n")
 		}
 		fmt.Fprintln(c.Out, message)
-
 		// these are the acceptable answers
 		okayResponses := sets.NewString("y", "yes")
 		nokayResponses := sets.NewString("n", "no")

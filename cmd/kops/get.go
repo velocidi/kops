@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -28,8 +29,8 @@ import (
 	"k8s.io/kops/cmd/kops/util"
 	api "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/kopscodecs"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
+	"k8s.io/kubectl/pkg/util/i18n"
+	"k8s.io/kubectl/pkg/util/templates"
 )
 
 var (
@@ -81,6 +82,8 @@ func NewCmdGet(f *util.Factory, out io.Writer) *cobra.Command {
 		Long:       getLong,
 		Example:    getExample,
 		Run: func(cmd *cobra.Command, args []string) {
+			ctx := context.TODO()
+
 			if len(args) != 0 {
 				options.clusterName = args[0]
 			}
@@ -93,7 +96,7 @@ func NewCmdGet(f *util.Factory, out io.Writer) *cobra.Command {
 				options.clusterName = rootCommand.clusterName
 			}
 
-			err := RunGet(&rootCommand, os.Stdout, options)
+			err := RunGet(ctx, &rootCommand, os.Stdout, options)
 			if err != nil {
 				exitWithError(err)
 			}
@@ -110,14 +113,14 @@ func NewCmdGet(f *util.Factory, out io.Writer) *cobra.Command {
 	return cmd
 }
 
-func RunGet(context Factory, out io.Writer, options *GetOptions) error {
+func RunGet(ctx context.Context, f Factory, out io.Writer, options *GetOptions) error {
 
-	client, err := context.Clientset()
+	client, err := f.Clientset()
 	if err != nil {
 		return err
 	}
 
-	cluster, err := client.GetCluster(options.clusterName)
+	cluster, err := client.GetCluster(ctx, options.clusterName)
 	if err != nil {
 		return err
 	}
@@ -126,29 +129,18 @@ func RunGet(context Factory, out io.Writer, options *GetOptions) error {
 		return fmt.Errorf("No cluster found")
 	}
 
-	clusterList := &api.ClusterList{}
-	clusterList.Items = make([]api.Cluster, 1)
-	clusterList.Items[0] = *cluster
-
-	args := make([]string, 0)
-
-	clusters, err := buildClusters(args, clusterList)
-	if err != nil {
-		return fmt.Errorf("error on buildClusters(): %v", err)
-	}
-
-	ig, err := client.InstanceGroupsFor(cluster).List(metav1.ListOptions{})
+	igList, err := client.InstanceGroupsFor(cluster).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
 
-	if ig == nil || ig.Items == nil || len(ig.Items) == 0 {
+	if igList == nil || igList.Items == nil || len(igList.Items) == 0 {
 		fmt.Fprintf(os.Stderr, "No instance groups found\n")
 	}
 
-	instancegroups, err := buildInstanceGroups(args, ig)
-	if err != nil {
-		return err
+	var instancegroups []*api.InstanceGroup
+	for i := range igList.Items {
+		instancegroups = append(instancegroups, &igList.Items[i])
 	}
 
 	var obj []runtime.Object
@@ -175,7 +167,7 @@ func RunGet(context Factory, out io.Writer, options *GetOptions) error {
 
 	case OutputTable:
 		fmt.Fprintf(os.Stdout, "Cluster\n")
-		err = clusterOutputTable(clusters, out)
+		err = clusterOutputTable([]*api.Cluster{cluster}, out)
 		if err != nil {
 			return err
 		}

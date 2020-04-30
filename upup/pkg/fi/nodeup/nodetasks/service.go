@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,12 +26,11 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/cloudinit"
 	"k8s.io/kops/upup/pkg/fi/nodeup/local"
 	"k8s.io/kops/upup/pkg/fi/nodeup/tags"
-
-	"github.com/golang/glog"
 )
 
 const (
@@ -43,6 +42,8 @@ const (
 	centosSystemdSystemPath = "/usr/lib/systemd/system"
 
 	coreosSystemdSystemPath = "/etc/systemd/system"
+
+	flatcarSystemdSystemPath = "/etc/systemd/system"
 
 	containerosSystemdSystemPath = "/etc/systemd/system"
 )
@@ -70,12 +71,12 @@ func (p *Service) GetDependencies(tasks map[string]fi.Task) []fi.Task {
 		// launching a custom Kubernetes build), they all depend on
 		// the "docker.service" Service task.
 		switch v.(type) {
-		case *File, *Package, *UpdatePackages, *UserTask, *MountDiskTask:
+		case *File, *Package, *UpdatePackages, *UserTask, *GroupTask, *MountDiskTask, *Chattr, *BindMount, *Archive:
 			deps = append(deps, v)
 		case *Service, *LoadImageTask:
 			// ignore
 		default:
-			glog.Warningf("Unhandled type %T in Service::GetDependencies: %v", v, v)
+			klog.Warningf("Unhandled type %T in Service::GetDependencies: %v", v, v)
 			deps = append(deps, v)
 		}
 	}
@@ -102,7 +103,7 @@ func NewService(name string, contents string, meta string) (fi.Task, error) {
 	return s, nil
 }
 
-func (s *Service) InitDefaults() {
+func (s *Service) InitDefaults() *Service {
 	// Default some values to true: Running, SmartRestart, ManageState
 	if s.Running == nil {
 		s.Running = fi.Bool(true)
@@ -118,10 +119,12 @@ func (s *Service) InitDefaults() {
 	if s.Enabled == nil {
 		s.Enabled = s.Running
 	}
+
+	return s
 }
 
 func getSystemdStatus(name string) (map[string]string, error) {
-	glog.V(2).Infof("querying state of service %q", name)
+	klog.V(2).Infof("querying state of service %q", name)
 	cmd := exec.Command("systemctl", "show", "--all", name)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -134,7 +137,7 @@ func getSystemdStatus(name string) (map[string]string, error) {
 		}
 		tokens := strings.SplitN(line, "=", 2)
 		if len(tokens) != 2 {
-			glog.Warningf("Ignoring line in systemd show output: %q", line)
+			klog.Warningf("Ignoring line in systemd show output: %q", line)
 			continue
 		}
 		properties[tokens[0]] = tokens[1]
@@ -149,6 +152,8 @@ func (e *Service) systemdSystemPath(target tags.HasTags) (string, error) {
 		return centosSystemdSystemPath, nil
 	} else if target.HasTag("_coreos") {
 		return coreosSystemdSystemPath, nil
+	} else if target.HasTag("_flatcar") {
+		return flatcarSystemdSystemPath, nil
 	} else if target.HasTag("_containeros") {
 		return containerosSystemdSystemPath, nil
 	} else {
@@ -200,7 +205,7 @@ func (e *Service) Find(c *fi.Context) (*Service, error) {
 	case "failed", "inactive":
 		actual.Running = fi.Bool(false)
 	default:
-		glog.Warningf("Unknown ActiveState=%q; will treat as not running", activeState)
+		klog.Warningf("Unknown ActiveState=%q; will treat as not running", activeState)
 		actual.Running = fi.Bool(false)
 	}
 
@@ -214,7 +219,7 @@ func (e *Service) Find(c *fi.Context) (*Service, error) {
 		actual.Enabled = fi.Bool(true)
 
 	default:
-		glog.Warningf("Unknown WantedBy=%q; will treat as not enabled", wantedBy)
+		klog.Warningf("Unknown WantedBy=%q; will treat as not enabled", wantedBy)
 		actual.Enabled = fi.Bool(false)
 	}
 
@@ -240,7 +245,7 @@ func getSystemdDependencies(serviceName string, definition string) ([]string, er
 			// We extract the first argument (only)
 			tokens := strings.SplitN(v, " ", 2)
 			dependencies = append(dependencies, tokens[0])
-			glog.V(2).Infof("extracted dependency from %q: %q", line, tokens[0])
+			klog.V(2).Infof("extracted dependency from %q: %q", line, tokens[0])
 		}
 	}
 	return dependencies, nil
@@ -279,7 +284,7 @@ func (_ *Service) RenderLocal(t *local.LocalTarget, a, e, changes *Service) erro
 			return fmt.Errorf("error writing systemd service file: %v", err)
 		}
 
-		glog.Infof("Reloading systemd configuration")
+		klog.Infof("Reloading systemd configuration")
 		cmd := exec.Command("systemctl", "daemon-reload")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -307,7 +312,7 @@ func (_ *Service) RenderLocal(t *local.LocalTarget, a, e, changes *Service) erro
 			for _, dependency := range dependencies {
 				stat, err := os.Stat(dependency)
 				if err != nil {
-					glog.Infof("Ignoring error checking service dependency %q: %v", dependency, err)
+					klog.Infof("Ignoring error checking service dependency %q: %v", dependency, err)
 					continue
 				}
 				modTime := stat.ModTime()
@@ -324,17 +329,17 @@ func (_ *Service) RenderLocal(t *local.LocalTarget, a, e, changes *Service) erro
 
 				startedAt := properties["ExecMainStartTimestamp"]
 				if startedAt == "" {
-					glog.Warningf("service was running, but did not have ExecMainStartTimestamp: %q", serviceName)
+					klog.Warningf("service was running, but did not have ExecMainStartTimestamp: %q", serviceName)
 				} else {
 					startedAtTime, err := time.Parse("Mon 2006-01-02 15:04:05 MST", startedAt)
 					if err != nil {
-						return fmt.Errorf("unable to parse service ExecMainStartTimestamp: %q", startedAt)
+						return fmt.Errorf("unable to parse service ExecMainStartTimestamp %q: %v", startedAt, err)
 					}
 					if startedAtTime.Before(newest) {
-						glog.V(2).Infof("will restart service %q because dependency changed after service start", serviceName)
+						klog.V(2).Infof("will restart service %q because dependency changed after service start", serviceName)
 						action = "restart"
 					} else {
-						glog.V(2).Infof("will not restart service %q - started after dependencies", serviceName)
+						klog.V(2).Infof("will not restart service %q - started after dependencies", serviceName)
 					}
 				}
 			}
@@ -342,7 +347,7 @@ func (_ *Service) RenderLocal(t *local.LocalTarget, a, e, changes *Service) erro
 	}
 
 	if action != "" && fi.BoolValue(e.ManageState) {
-		glog.Infof("Restarting service %q", serviceName)
+		klog.Infof("Restarting service %q", serviceName)
 		cmd := exec.Command("systemctl", action, serviceName)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -353,10 +358,10 @@ func (_ *Service) RenderLocal(t *local.LocalTarget, a, e, changes *Service) erro
 	if changes.Enabled != nil && fi.BoolValue(e.ManageState) {
 		var args []string
 		if fi.BoolValue(e.Enabled) {
-			glog.Infof("Enabling service %q", serviceName)
+			klog.Infof("Enabling service %q", serviceName)
 			args = []string{"enable", serviceName}
 		} else {
-			glog.Infof("Disabling service %q", serviceName)
+			klog.Infof("Disabling service %q", serviceName)
 			args = []string{"disable", serviceName}
 		}
 		cmd := exec.Command("systemctl", args...)
@@ -399,5 +404,5 @@ func (f *Service) GetName() *string {
 }
 
 func (f *Service) SetName(name string) {
-	glog.Fatalf("SetName not supported for Service task")
+	klog.Fatalf("SetName not supported for Service task")
 }

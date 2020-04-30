@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +26,9 @@ import (
 )
 
 type MockEC2 struct {
+	// Stub out interface
+	ec2iface.EC2API
+
 	mutex sync.Mutex
 
 	addressNumber int
@@ -51,6 +54,8 @@ type MockEC2 struct {
 	Vpcs map[string]*vpcInfo
 
 	InternetGateways map[string]*ec2.InternetGateway
+
+	LaunchTemplates map[string]*ec2.ResponseLaunchTemplateData
 
 	NatGateways map[string]*ec2.NatGateway
 

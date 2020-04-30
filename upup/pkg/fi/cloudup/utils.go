@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,11 +20,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/dnsprovider/pkg/dnsprovider"
 	"k8s.io/kops/dnsprovider/pkg/dnsprovider/providers/aws/route53"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/upup/pkg/fi"
+	"k8s.io/kops/upup/pkg/fi/cloudup/aliup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/baremetal"
 	"k8s.io/kops/upup/pkg/fi/cloudup/do"
@@ -111,7 +112,7 @@ func BuildCloud(cluster *kops.Cluster) (fi.Cloud, error) {
 			region := cluster.Spec.Subnets[0].Zone
 			doCloud, err := do.NewDOCloud(region)
 			if err != nil {
-				return nil, fmt.Errorf("error initializin digitalocean cloud!")
+				return nil, fmt.Errorf("error initializing digitalocean cloud: %s", err)
 			}
 
 			cloud = doCloud
@@ -134,13 +135,35 @@ func BuildCloud(cluster *kops.Cluster) (fi.Cloud, error) {
 	case kops.CloudProviderOpenstack:
 		{
 			cloudTags := map[string]string{openstack.TagClusterName: cluster.ObjectMeta.Name}
-			osc, err := openstack.NewOpenstackCloud(cloudTags)
+			osc, err := openstack.NewOpenstackCloud(cloudTags, &cluster.Spec)
 			if err != nil {
 				return nil, err
 			}
+			var zoneNames []string
+			for _, subnet := range cluster.Spec.Subnets {
+				if !fi.ArrayContains(zoneNames, subnet.Zone) {
+					zoneNames = append(zoneNames, subnet.Zone)
+				}
+			}
+			osc.UseZones(zoneNames)
 			cloud = osc
 		}
 
+	case kops.CloudProviderALI:
+		{
+			region, err := aliup.FindRegion(cluster)
+			if err != nil {
+				return nil, err
+			}
+
+			cloudTags := map[string]string{aliup.TagClusterName: cluster.ObjectMeta.Name}
+			aliCloud, err := aliup.NewALICloud(region, cloudTags)
+			if err != nil {
+				return nil, err
+			}
+
+			cloud = aliCloud
+		}
 	default:
 		return nil, fmt.Errorf("unknown CloudProvider %q", cluster.Spec.CloudProvider)
 	}
@@ -148,7 +171,7 @@ func BuildCloud(cluster *kops.Cluster) (fi.Cloud, error) {
 }
 
 func FindDNSHostedZone(dns dnsprovider.Interface, clusterDNSName string, dnsType kops.DNSType) (string, error) {
-	glog.V(2).Infof("Querying for all DNS zones to find match for %q", clusterDNSName)
+	klog.V(2).Infof("Querying for all DNS zones to find match for %q", clusterDNSName)
 
 	clusterDNSName = "." + strings.TrimSuffix(clusterDNSName, ".")
 
@@ -179,7 +202,7 @@ func FindDNSHostedZone(dns dnsprovider.Interface, clusterDNSName string, dnsType
 						zoneDNSType = kops.DNSTypePrivate
 					}
 					if zoneDNSType != dnsType {
-						glog.Infof("Found matching hosted zone %q, but it was %q and we require %q", zoneName, zoneDNSType, dnsType)
+						klog.Infof("Found matching hosted zone %q, but it was %q and we require %q", zoneName, zoneDNSType, dnsType)
 						continue
 					}
 				}
@@ -212,7 +235,7 @@ func FindDNSHostedZone(dns dnsprovider.Interface, clusterDNSName string, dnsType
 		// We make this an error because you have to set up DNS delegation anyway
 		tokens := strings.Split(clusterDNSName, ".")
 		suffix := strings.Join(tokens[len(tokens)-2:], ".")
-		//glog.Warningf("No matching hosted zones found; will created %q", suffix)
+		//klog.Warningf("No matching hosted zones found; will created %q", suffix)
 		//return suffix, nil
 		return "", fmt.Errorf("No matching hosted zones found for %q; please create one (e.g. %q) first", clusterDNSName, suffix)
 	}

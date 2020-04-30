@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,19 +28,28 @@ When defining a new function:
 package cloudup
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"text/template"
 
-	"github.com/golang/glog"
+	"github.com/Masterminds/sprig"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog"
+	kopscontrollerconfig "k8s.io/kops/cmd/kops-controller/pkg/config"
 	"k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/pkg/apis/kops/util"
 	"k8s.io/kops/pkg/dns"
+	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/pkg/model"
+	"k8s.io/kops/pkg/resources/spotinst"
+	"k8s.io/kops/pkg/wellknownports"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
+	"k8s.io/kops/util/pkg/env"
 )
 
 // TemplateFunctions provides a collection of methods used throughout the templates
@@ -55,10 +64,12 @@ type TemplateFunctions struct {
 // This will define the available functions we can use in our YAML models
 // If we are trying to get a new function implemented it MUST
 // be defined here.
-func (tf *TemplateFunctions) AddTo(dest template.FuncMap) {
+func (tf *TemplateFunctions) AddTo(dest template.FuncMap, secretStore fi.SecretStore) (err error) {
 	dest["EtcdScheme"] = tf.EtcdScheme
 	dest["SharedVPC"] = tf.SharedVPC
-	dest["UseEtcdTLS"] = tf.UseEtcdTLS
+	dest["ToJSON"] = tf.ToJSON
+	dest["UseBootstrapTokens"] = tf.modelContext.UseBootstrapTokens
+	dest["UseEtcdTLS"] = tf.modelContext.UseEtcdTLS
 	// Remember that we may be on a different arch from the target.  Hard-code for now.
 	dest["Arch"] = func() string { return "amd64" }
 	dest["replace"] = func(s, find, replace string) string {
@@ -67,6 +78,9 @@ func (tf *TemplateFunctions) AddTo(dest template.FuncMap) {
 	dest["join"] = func(a []string, sep string) string {
 		return strings.Join(a, sep)
 	}
+
+	sprigTxtFuncMap := sprig.TxtFuncMap()
+	dest["indent"] = sprigTxtFuncMap["indent"]
 
 	dest["ClusterName"] = tf.modelContext.ClusterName
 	dest["HasTag"] = tf.HasTag
@@ -83,45 +97,90 @@ func (tf *TemplateFunctions) AddTo(dest template.FuncMap) {
 		return tf.cluster.Spec.KubeDNS
 	}
 
+	dest["NodeLocalDNSClusterIP"] = func() string {
+		if tf.cluster.Spec.KubeProxy.ProxyMode == "ipvs" {
+			return tf.cluster.Spec.KubeDNS.ServerIP
+		} else {
+			return "__PILLAR__CLUSTER__DNS__"
+		}
+	}
+	dest["NodeLocalDNSServerIP"] = func() string {
+		if tf.cluster.Spec.KubeProxy.ProxyMode == "ipvs" {
+			return ""
+		} else {
+			return tf.cluster.Spec.KubeDNS.ServerIP
+		}
+	}
+
+	dest["KopsControllerArgv"] = tf.KopsControllerArgv
+	dest["KopsControllerConfig"] = tf.KopsControllerConfig
 	dest["DnsControllerArgv"] = tf.DnsControllerArgv
 	dest["ExternalDnsArgv"] = tf.ExternalDnsArgv
-
+	dest["CloudControllerConfigArgv"] = tf.CloudControllerConfigArgv
 	// TODO: Only for GCE?
 	dest["EncodeGCELabel"] = gce.EncodeGCELabel
 	dest["Region"] = func() string {
 		return tf.region
 	}
 
+	if featureflag.EnableExternalCloudController.Enabled() {
+		// will return openstack external ccm image location for current kubernetes version
+		dest["OpenStackCCM"] = tf.OpenStackCCM
+	}
 	dest["ProxyEnv"] = tf.ProxyEnv
+
+	dest["KopsSystemEnv"] = tf.KopsSystemEnv
 
 	dest["DO_TOKEN"] = func() string {
 		return os.Getenv("DIGITALOCEAN_ACCESS_TOKEN")
 	}
 
+	if featureflag.Spotinst.Enabled() {
+		if creds, err := spotinst.LoadCredentials(); err == nil {
+			dest["SpotinstToken"] = func() string { return creds.Token }
+			dest["SpotinstAccount"] = func() string { return creds.Account }
+		}
+	}
+
 	if tf.cluster.Spec.Networking != nil && tf.cluster.Spec.Networking.Flannel != nil {
 		flannelBackendType := tf.cluster.Spec.Networking.Flannel.Backend
 		if flannelBackendType == "" {
-			glog.Warningf("Defaulting flannel backend to udp (not a recommended configuration)")
+			klog.Warningf("Defaulting flannel backend to udp (not a recommended configuration)")
 			flannelBackendType = "udp"
 		}
 		dest["FlannelBackendType"] = func() string { return flannelBackendType }
 	}
-}
 
-// UseEtcdTLS checks if cluster is using etcd tls
-func (tf *TemplateFunctions) UseEtcdTLS() bool {
-	for _, x := range tf.cluster.Spec.EtcdClusters {
-		if x.EnableEtcdTLS {
-			return true
+	if tf.cluster.Spec.Networking != nil && tf.cluster.Spec.Networking.Weave != nil {
+		weavesecretString := ""
+		weavesecret, _ := secretStore.Secret("weavepassword")
+		if weavesecret != nil {
+			weavesecretString, err = weavesecret.AsString()
+			if err != nil {
+				return err
+			}
+			klog.V(4).Info("Weave secret function successfully registered")
 		}
+
+		dest["WeaveSecret"] = func() string { return weavesecretString }
 	}
 
-	return false
+	return nil
+}
+
+// ToJSON returns a json representation of the struct or on error an empty string
+func (tf *TemplateFunctions) ToJSON(data interface{}) string {
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return ""
+	}
+
+	return string(encoded)
 }
 
 // EtcdScheme parses and grabs the protocol to the etcd cluster
 func (tf *TemplateFunctions) EtcdScheme() string {
-	if tf.UseEtcdTLS() {
+	if tf.modelContext.UseEtcdTLS() {
 		return "https"
 	}
 
@@ -149,6 +208,52 @@ func (tf *TemplateFunctions) GetInstanceGroup(name string) (*kops.InstanceGroup,
 	return nil, fmt.Errorf("InstanceGroup %q not found", name)
 }
 
+// CloudControllerConfigArgv returns the args to external cloud controller
+func (tf *TemplateFunctions) CloudControllerConfigArgv() ([]string, error) {
+	if tf.cluster.Spec.ExternalCloudControllerManager == nil {
+		return nil, fmt.Errorf("ExternalCloudControllerManager is nil")
+	}
+	var argv []string
+
+	if tf.cluster.Spec.ExternalCloudControllerManager.Master != "" {
+		argv = append(argv, fmt.Sprintf("--master=%s", tf.cluster.Spec.ExternalCloudControllerManager.Master))
+	}
+	if tf.cluster.Spec.ExternalCloudControllerManager.LogLevel != 0 {
+		argv = append(argv, fmt.Sprintf("--v=%d", tf.cluster.Spec.ExternalCloudControllerManager.LogLevel))
+	} else {
+		argv = append(argv, "--v=2")
+	}
+	if tf.cluster.Spec.ExternalCloudControllerManager.CloudProvider != "" {
+		argv = append(argv, fmt.Sprintf("--cloud-provider=%s", tf.cluster.Spec.ExternalCloudControllerManager.CloudProvider))
+	} else if tf.cluster.Spec.CloudProvider != "" {
+		argv = append(argv, fmt.Sprintf("--cloud-provider=%s", tf.cluster.Spec.CloudProvider))
+	} else {
+		return nil, fmt.Errorf("Cloud Provider is not set")
+	}
+	if tf.cluster.Spec.ExternalCloudControllerManager.ClusterName != "" {
+		argv = append(argv, fmt.Sprintf("--cluster-name=%s", tf.cluster.Spec.ExternalCloudControllerManager.ClusterName))
+	}
+	if tf.cluster.Spec.ExternalCloudControllerManager.ClusterCIDR != "" {
+		argv = append(argv, fmt.Sprintf("--cluster-cidr=%s", tf.cluster.Spec.ExternalCloudControllerManager.ClusterCIDR))
+	}
+	if tf.cluster.Spec.ExternalCloudControllerManager.AllocateNodeCIDRs != nil {
+		argv = append(argv, fmt.Sprintf("--allocate-node-cidrs=%t", *tf.cluster.Spec.ExternalCloudControllerManager.AllocateNodeCIDRs))
+	}
+	if tf.cluster.Spec.ExternalCloudControllerManager.ConfigureCloudRoutes != nil {
+		argv = append(argv, fmt.Sprintf("--configure-cloud-routes=%t", *tf.cluster.Spec.ExternalCloudControllerManager.ConfigureCloudRoutes))
+	}
+	if tf.cluster.Spec.ExternalCloudControllerManager.CIDRAllocatorType != nil && *tf.cluster.Spec.ExternalCloudControllerManager.CIDRAllocatorType != "" {
+		argv = append(argv, fmt.Sprintf("--cidr-allocator-type=%s", *tf.cluster.Spec.ExternalCloudControllerManager.CIDRAllocatorType))
+	}
+	if tf.cluster.Spec.ExternalCloudControllerManager.UseServiceAccountCredentials != nil {
+		argv = append(argv, fmt.Sprintf("--use-service-account-credentials=%t", *tf.cluster.Spec.ExternalCloudControllerManager.UseServiceAccountCredentials))
+	} else {
+		argv = append(argv, fmt.Sprintf("--use-service-account-credentials=%t", true))
+	}
+
+	return argv, nil
+}
+
 // DnsControllerArgv returns the args to the DNS controller
 func (tf *TemplateFunctions) DnsControllerArgv() ([]string, error) {
 	var argv []string
@@ -159,7 +264,7 @@ func (tf *TemplateFunctions) DnsControllerArgv() ([]string, error) {
 	if tf.cluster.Spec.ExternalDNS == nil {
 		argv = append(argv, []string{"--watch-ingress=false"}...)
 
-		glog.V(4).Infof("watch-ingress=false set on dns-controller")
+		klog.V(4).Infof("watch-ingress=false set on dns-controller")
 	} else {
 		// @check if the watch ingress is set
 		var watchIngress bool
@@ -168,8 +273,8 @@ func (tf *TemplateFunctions) DnsControllerArgv() ([]string, error) {
 		}
 
 		if watchIngress {
-			glog.Warningln("--watch-ingress=true set on dns-controller")
-			glog.Warningln("this may cause problems with previously defined services: https://github.com/kubernetes/kops/issues/2496")
+			klog.Warningln("--watch-ingress=true set on dns-controller")
+			klog.Warningln("this may cause problems with previously defined services: https://github.com/kubernetes/kops/issues/2496")
 		}
 		argv = append(argv, fmt.Sprintf("--watch-ingress=%t", watchIngress))
 		if tf.cluster.Spec.ExternalDNS.WatchNamespace != "" {
@@ -179,7 +284,50 @@ func (tf *TemplateFunctions) DnsControllerArgv() ([]string, error) {
 
 	if dns.IsGossipHostname(tf.cluster.Spec.MasterInternalName) {
 		argv = append(argv, "--dns=gossip")
-		argv = append(argv, "--gossip-seed=127.0.0.1:3999")
+
+		// Configuration specifically for the DNS controller gossip
+		if tf.cluster.Spec.DNSControllerGossipConfig != nil {
+			if tf.cluster.Spec.DNSControllerGossipConfig.Protocol != nil {
+				argv = append(argv, "--gossip-protocol="+*tf.cluster.Spec.DNSControllerGossipConfig.Protocol)
+			}
+			if tf.cluster.Spec.DNSControllerGossipConfig.Listen != nil {
+				argv = append(argv, "--gossip-listen="+*tf.cluster.Spec.DNSControllerGossipConfig.Listen)
+			}
+			if tf.cluster.Spec.DNSControllerGossipConfig.Secret != nil {
+				argv = append(argv, "--gossip-secret="+*tf.cluster.Spec.DNSControllerGossipConfig.Secret)
+			}
+
+			if tf.cluster.Spec.DNSControllerGossipConfig.Seed != nil {
+				argv = append(argv, "--gossip-seed="+*tf.cluster.Spec.DNSControllerGossipConfig.Seed)
+			} else {
+				argv = append(argv, fmt.Sprintf("--gossip-seed=127.0.0.1:%d", wellknownports.ProtokubeGossipWeaveMesh))
+			}
+
+			if tf.cluster.Spec.DNSControllerGossipConfig.Secondary != nil {
+				if tf.cluster.Spec.DNSControllerGossipConfig.Secondary.Protocol != nil {
+					argv = append(argv, "--gossip-protocol-secondary="+*tf.cluster.Spec.DNSControllerGossipConfig.Secondary.Protocol)
+				}
+				if tf.cluster.Spec.DNSControllerGossipConfig.Secondary.Listen != nil {
+					argv = append(argv, "--gossip-listen-secondary="+*tf.cluster.Spec.DNSControllerGossipConfig.Secondary.Listen)
+				}
+				if tf.cluster.Spec.DNSControllerGossipConfig.Secondary.Secret != nil {
+					argv = append(argv, "--gossip-secret-secondary="+*tf.cluster.Spec.DNSControllerGossipConfig.Secondary.Secret)
+				}
+
+				if tf.cluster.Spec.DNSControllerGossipConfig.Secondary.Seed != nil {
+					argv = append(argv, "--gossip-seed-secondary="+*tf.cluster.Spec.DNSControllerGossipConfig.Secondary.Seed)
+				} else {
+					argv = append(argv, fmt.Sprintf("--gossip-seed-secondary=127.0.0.1:%d", wellknownports.ProtokubeGossipMemberlist))
+				}
+			}
+		} else {
+			// Default to primary mesh and secondary memberlist
+			argv = append(argv, fmt.Sprintf("--gossip-seed=127.0.0.1:%d", wellknownports.ProtokubeGossipWeaveMesh))
+
+			argv = append(argv, "--gossip-protocol-secondary=memberlist")
+			argv = append(argv, fmt.Sprintf("--gossip-listen-secondary=0.0.0.0:%d", wellknownports.DNSControllerGossipMemberlist))
+			argv = append(argv, fmt.Sprintf("--gossip-seed-secondary=127.0.0.1:%d", wellknownports.ProtokubeGossipMemberlist))
+		}
 	} else {
 		switch kops.CloudProviderID(tf.cluster.Spec.CloudProvider) {
 		case kops.CloudProviderAWS:
@@ -215,6 +363,37 @@ func (tf *TemplateFunctions) DnsControllerArgv() ([]string, error) {
 	argv = append(argv, "--zone=*/*")
 	// Verbose, but not crazy logging
 	argv = append(argv, "-v=2")
+
+	return argv, nil
+}
+
+// KopsControllerConfig returns the yaml configuration for kops-controller
+func (tf *TemplateFunctions) KopsControllerConfig() (string, error) {
+	config := &kopscontrollerconfig.Options{
+		Cloud:      tf.cluster.Spec.CloudProvider,
+		ConfigBase: tf.cluster.Spec.ConfigBase,
+	}
+
+	// To avoid indentation problems, we marshal as json.  json is a subset of yaml
+	b, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize kops-controller config: %v", err)
+	}
+
+	return string(b), nil
+}
+
+// KopsControllerArgv returns the args to kops-controller
+func (tf *TemplateFunctions) KopsControllerArgv() ([]string, error) {
+
+	var argv []string
+
+	argv = append(argv, "/usr/bin/kops-controller")
+
+	// Verbose, but not excessive logging
+	argv = append(argv, "--v=2")
+
+	argv = append(argv, "--conf=/etc/kubernetes/kops-controller/config.yaml")
 
 	return argv, nil
 }
@@ -263,4 +442,30 @@ func (tf *TemplateFunctions) ProxyEnv() map[string]string {
 		envs["NO_PROXY"] = proxies.ProxyExcludes
 	}
 	return envs
+}
+
+// KopsSystemEnv builds the env vars for a system component
+func (tf *TemplateFunctions) KopsSystemEnv() []corev1.EnvVar {
+	envMap := env.BuildSystemComponentEnvVars(&tf.cluster.Spec)
+
+	return envMap.ToEnvVars()
+}
+
+// OpenStackCCM returns OpenStack external cloud controller manager current image
+// with tag specified to k8s version
+func (tf *TemplateFunctions) OpenStackCCM() string {
+	var tag string
+	parsed, err := util.ParseKubernetesVersion(tf.cluster.Spec.KubernetesVersion)
+	if err != nil {
+		tag = "latest"
+	} else {
+		if parsed.Minor == 13 {
+			// The bugfix release
+			tag = "1.13.1"
+		} else {
+			// otherwise we use always .0 ccm image, if needed that can be overrided using clusterspec
+			tag = fmt.Sprintf("v%d.%d.0", parsed.Major, parsed.Minor)
+		}
+	}
+	return fmt.Sprintf("docker.io/k8scloudprovider/openstack-cloud-controller-manager:%s", tag)
 }

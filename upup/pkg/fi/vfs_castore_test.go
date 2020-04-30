@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/pki"
 	"k8s.io/kops/util/pkg/vfs"
 )
@@ -107,7 +108,7 @@ func TestVFSCAStoreRoundTrip(t *testing.T) {
 		}
 
 		expected := `
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: Keyset
 metadata:
   creationTimestamp: null
@@ -166,7 +167,7 @@ spec:
 		}
 
 		expected := `
-apiVersion: kops/v1alpha2
+apiVersion: kops.k8s.io/v1alpha2
 kind: Keyset
 metadata:
   creationTimestamp: null
@@ -212,6 +213,22 @@ spec:
 		if string(roundTrip) != privateKeyData {
 			t.Fatalf("unexpected round-tripped private key data: %q", string(roundTrip))
 		}
+	}
+
+	// Check that keyset gets deleted
+	{
+		keyset := &kops.Keyset{}
+		keyset.Name = "ca"
+		keyset.Spec.Type = kops.SecretTypeKeypair
+
+		s.DeleteKeysetItem(keyset, "237054359138908419352140518924933177492")
+
+		_, err := pathMap["memfs://tests/private/ca/237054359138908419352140518924933177492.key"].ReadFile()
+		pathMap["memfs://tests/private/ca/237054359138908419352140518924933177492.key"].ReadFile()
+		if err == nil {
+			t.Fatalf("File memfs://tests/private/ca/237054359138908419352140518924933177492.key still exists")
+		}
+
 	}
 
 }

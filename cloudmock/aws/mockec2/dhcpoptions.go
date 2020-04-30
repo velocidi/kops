@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,20 +23,20 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 func (m *MockEC2) DescribeDhcpOptions(request *ec2.DescribeDhcpOptionsInput) (*ec2.DescribeDhcpOptionsOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DescribeDhcpOptions: %v", request)
+	klog.Infof("DescribeDhcpOptions: %v", request)
 
 	if request.DryRun != nil {
-		glog.Fatalf("DryRun not implemented")
+		klog.Fatalf("DryRun not implemented")
 	}
 	if request.DhcpOptionsIds != nil {
-		glog.Fatalf("DhcpOptionsIds not implemented")
+		klog.Fatalf("DhcpOptionsIds not implemented")
 	}
 
 	response := &ec2.DescribeDhcpOptionsOutput{}
@@ -78,21 +78,19 @@ func (m *MockEC2) DescribeDhcpOptions(request *ec2.DescribeDhcpOptionsInput) (*e
 
 func (m *MockEC2) DescribeDhcpOptionsWithContext(aws.Context, *ec2.DescribeDhcpOptionsInput, ...request.Option) (*ec2.DescribeDhcpOptionsOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) DescribeDhcpOptionsRequest(*ec2.DescribeDhcpOptionsInput) (*request.Request, *ec2.DescribeDhcpOptionsOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) AssociateDhcpOptions(request *ec2.AssociateDhcpOptionsInput) (*ec2.AssociateDhcpOptionsOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("AssociateDhcpOptions: %v", request)
+	klog.Infof("AssociateDhcpOptions: %v", request)
 
 	if request.DryRun != nil {
-		glog.Fatalf("DryRun")
+		klog.Fatalf("DryRun")
 	}
 
 	dopt := m.DhcpOptions[*request.DhcpOptionsId]
@@ -112,21 +110,19 @@ func (m *MockEC2) AssociateDhcpOptions(request *ec2.AssociateDhcpOptionsInput) (
 }
 func (m *MockEC2) AssociateDhcpOptionsWithContext(aws.Context, *ec2.AssociateDhcpOptionsInput, ...request.Option) (*ec2.AssociateDhcpOptionsOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) AssociateDhcpOptionsRequest(*ec2.AssociateDhcpOptionsInput) (*request.Request, *ec2.AssociateDhcpOptionsOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) CreateDhcpOptions(request *ec2.CreateDhcpOptionsInput) (*ec2.CreateDhcpOptionsOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("CreateDhcpOptions: %v", request)
+	klog.Infof("CreateDhcpOptions: %v", request)
 
 	if request.DryRun != nil {
-		glog.Fatalf("DryRun")
+		klog.Fatalf("DryRun")
 	}
 
 	n := len(m.DhcpOptions) + 1
@@ -157,18 +153,16 @@ func (m *MockEC2) CreateDhcpOptions(request *ec2.CreateDhcpOptionsInput) (*ec2.C
 }
 func (m *MockEC2) CreateDhcpOptionsWithContext(aws.Context, *ec2.CreateDhcpOptionsInput, ...request.Option) (*ec2.CreateDhcpOptionsOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) CreateDhcpOptionsRequest(*ec2.CreateDhcpOptionsInput) (*request.Request, *ec2.CreateDhcpOptionsOutput) {
 	panic("Not implemented")
-	return nil, nil
 }
 
 func (m *MockEC2) DeleteDhcpOptions(request *ec2.DeleteDhcpOptionsInput) (*ec2.DeleteDhcpOptionsOutput, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	glog.Infof("DeleteDhcpOptions: %v", request)
+	klog.Infof("DeleteDhcpOptions: %v", request)
 
 	id := aws.StringValue(request.DhcpOptionsId)
 	o := m.DhcpOptions[id]
@@ -182,9 +176,7 @@ func (m *MockEC2) DeleteDhcpOptions(request *ec2.DeleteDhcpOptionsInput) (*ec2.D
 
 func (m *MockEC2) DeleteDhcpOptionsWithContext(aws.Context, *ec2.DeleteDhcpOptionsInput, ...request.Option) (*ec2.DeleteDhcpOptionsOutput, error) {
 	panic("Not implemented")
-	return nil, nil
 }
 func (m *MockEC2) DeleteDhcpOptionsRequest(*ec2.DeleteDhcpOptionsInput) (*request.Request, *ec2.DeleteDhcpOptionsOutput) {
 	panic("Not implemented")
-	return nil, nil
 }

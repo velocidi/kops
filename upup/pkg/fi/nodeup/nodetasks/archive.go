@@ -23,9 +23,12 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/cloudinit"
 	"k8s.io/kops/upup/pkg/fi/nodeup/local"
@@ -43,6 +46,12 @@ type Archive struct {
 
 	// TargetDir is the directory for extraction
 	TargetDir string `json:"target,omitempty"`
+
+	// StripComponents is the number of components to remove when expanding the archive
+	StripComponents int `json:"stripComponents,omitempty"`
+
+	// MapFiles is the list of files to extract with corresponding directories to extract
+	MapFiles map[string]string `json:"mapFiles,omitempty"`
 }
 
 const (
@@ -57,9 +66,7 @@ func (e *Archive) GetDependencies(tasks map[string]fi.Task) []fi.Task {
 	var deps []fi.Task
 
 	// Requires parent directories to be created
-	for _, v := range findCreatesDirParents(e.TargetDir, tasks) {
-		deps = append(deps, v)
-	}
+	deps = append(deps, findCreatesDirParents(e.TargetDir, tasks)...)
 
 	return deps
 }
@@ -95,7 +102,7 @@ func (e *Archive) Find(c *fi.Context) (*Archive, error) {
 		if os.IsNotExist(err) {
 			stateBytes = nil
 		} else {
-			glog.Warningf("error reading archive state %s: %v", localStateFile, err)
+			klog.Warningf("error reading archive state %s: %v", localStateFile, err)
 			// We can just reinstall
 			return nil, nil
 		}
@@ -108,7 +115,7 @@ func (e *Archive) Find(c *fi.Context) (*Archive, error) {
 
 	state := &Archive{}
 	if err := json.Unmarshal(stateBytes, state); err != nil {
-		glog.Warningf("error unmarshalling archive state %s: %v", localStateFile, err)
+		klog.Warningf("error unmarshaling archive state %s: %v", localStateFile, err)
 		// We can just reinstall
 		return nil, nil
 	}
@@ -126,7 +133,7 @@ func (e *Archive) Run(c *fi.Context) error {
 	return fi.DefaultDeltaRunMethod(e, c)
 }
 
-// CheckChanges immplements fi.Task::CheckChanges
+// CheckChanges implements fi.Task::CheckChanges
 func (_ *Archive) CheckChanges(a, e, changes *Archive) error {
 	return nil
 }
@@ -134,7 +141,7 @@ func (_ *Archive) CheckChanges(a, e, changes *Archive) error {
 // RenderLocal implements the fi.Task::Render functionality for a local target
 func (_ *Archive) RenderLocal(t *local.LocalTarget, a, e, changes *Archive) error {
 	if a == nil {
-		glog.Infof("Installing archive %q", e.Name)
+		klog.Infof("Installing archive %q", e.Name)
 
 		localFile := path.Join(localArchiveDir, e.Name)
 		if err := os.MkdirAll(localArchiveDir, 0755); err != nil {
@@ -145,7 +152,7 @@ func (_ *Archive) RenderLocal(t *local.LocalTarget, a, e, changes *Archive) erro
 		if e.Hash != "" {
 			parsed, err := hashing.FromString(e.Hash)
 			if err != nil {
-				return fmt.Errorf("error paring hash: %v", err)
+				return fmt.Errorf("error parsing hash: %v", err)
 			}
 			hash = parsed
 		}
@@ -153,16 +160,38 @@ func (_ *Archive) RenderLocal(t *local.LocalTarget, a, e, changes *Archive) erro
 			return err
 		}
 
-		targetDir := e.TargetDir
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
-			return fmt.Errorf("error creating directories %q: %v", targetDir, err)
-		}
+		if len(e.MapFiles) == 0 {
+			targetDir := e.TargetDir
+			if err := os.MkdirAll(targetDir, 0755); err != nil {
+				return fmt.Errorf("error creating directories %q: %v", targetDir, err)
+			}
 
-		args := []string{"tar", "xf", localFile, "-C", targetDir}
-		glog.Infof("running command %s", args)
-		cmd := exec.Command(args[0], args[1:]...)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("error installing archive %q: %v: %s", e.Name, err, string(output))
+			args := []string{"tar", "xf", localFile, "-C", targetDir}
+			if e.StripComponents != 0 {
+				args = append(args, "--strip-components="+strconv.Itoa(e.StripComponents))
+			}
+
+			klog.Infof("running command %s", args)
+			cmd := exec.Command(args[0], args[1:]...)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("error installing archive %q: %v: %s", e.Name, err, string(output))
+			}
+		} else {
+			for src, dest := range e.MapFiles {
+				stripCount := strings.Count(src, "/")
+				targetDir := filepath.Join(e.TargetDir, dest)
+				if err := os.MkdirAll(targetDir, 0755); err != nil {
+					return fmt.Errorf("error creating directories %q: %v", targetDir, err)
+				}
+
+				args := []string{"tar", "xf", localFile, "-C", targetDir, "--wildcards", "--strip-components=" + strconv.Itoa(stripCount), src}
+
+				klog.Infof("running command %s", args)
+				cmd := exec.Command(args[0], args[1:]...)
+				if output, err := cmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("error installing archive %q: %v: %s", e.Name, err, string(output))
+				}
+			}
 		}
 
 		// We write a marker file to prevent re-execution
@@ -173,7 +202,7 @@ func (_ *Archive) RenderLocal(t *local.LocalTarget, a, e, changes *Archive) erro
 
 		state, err := json.MarshalIndent(e, "", "  ")
 		if err != nil {
-			return fmt.Errorf("error marshalling archive state: %v", err)
+			return fmt.Errorf("error marshaling archive state: %v", err)
 		}
 
 		if err := ioutil.WriteFile(localStateFile, state, 0644); err != nil {
@@ -181,7 +210,7 @@ func (_ *Archive) RenderLocal(t *local.LocalTarget, a, e, changes *Archive) erro
 		}
 	} else {
 		if !reflect.DeepEqual(changes, &Archive{}) {
-			glog.Warningf("cannot apply archive changes for %q: %v", e.Name, changes)
+			klog.Warningf("cannot apply archive changes for %q: %v", e.Name, changes)
 		}
 	}
 

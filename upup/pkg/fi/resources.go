@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -139,6 +139,12 @@ type BytesResource struct {
 	data []byte
 }
 
+// MarshalJSON is a custom marshaller so this will be printed as a string (instead of nothing)
+// This is used in tests to verify the expected output.
+func (b *BytesResource) MarshalJSON() ([]byte, error) {
+	return json.Marshal(string(b.data))
+}
+
 var _ Resource = &BytesResource{}
 
 func NewBytesResource(data []byte) *BytesResource {
@@ -194,7 +200,7 @@ func (r *VFSResource) Open() (io.Reader, error) {
 }
 
 // ResourceHolder is used in JSON/YAML models; it holds a resource but renders to/from a string
-// After unmarshalling, the resource should be found by Name, and set on Resource
+// After unmarshaling, the resource should be found by Name, and set on Resource
 type ResourceHolder struct {
 	Name     string
 	Resource Resource
@@ -210,7 +216,7 @@ func (o *ResourceHolder) Open() (io.Reader, error) {
 	return o.Resource.Open()
 }
 
-// UnmarshalJSON implements the special JSON marshalling for the resource, rendering the name
+// UnmarshalJSON implements the special JSON marshaling for the resource, rendering the name
 func (o *ResourceHolder) UnmarshalJSON(data []byte) error {
 	var jsonName string
 	err := json.Unmarshal(data, &jsonName)

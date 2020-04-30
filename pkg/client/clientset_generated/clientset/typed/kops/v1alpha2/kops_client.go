@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2020 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ limitations under the License.
 package v1alpha2
 
 import (
-	serializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	rest "k8s.io/client-go/rest"
 	v1alpha2 "k8s.io/kops/pkg/apis/kops/v1alpha2"
 	"k8s.io/kops/pkg/client/clientset_generated/clientset/scheme"
@@ -33,7 +32,7 @@ type KopsV1alpha2Interface interface {
 	SSHCredentialsGetter
 }
 
-// KopsV1alpha2Client is used to interact with features provided by the kops group.
+// KopsV1alpha2Client is used to interact with features provided by the kops.k8s.io group.
 type KopsV1alpha2Client struct {
 	restClient rest.Interface
 }
@@ -86,7 +85,7 @@ func setConfigDefaults(config *rest.Config) error {
 	gv := v1alpha2.SchemeGroupVersion
 	config.GroupVersion = &gv
 	config.APIPath = "/apis"
-	config.NegotiatedSerializer = serializer.DirectCodecFactory{CodecFactory: scheme.Codecs}
+	config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
 
 	if config.UserAgent == "" {
 		config.UserAgent = rest.DefaultKubernetesUserAgent()
