@@ -61,7 +61,7 @@ metadata:
 data:
   use-proxy-protocol: "false"
   client-body-buffer-size: "16k"
-  proxy-connect-timeout: 60
+  proxy-connect-timeout: "60"
   proxy-body-size: "10m"
 
 ---
