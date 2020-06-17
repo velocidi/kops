@@ -61,7 +61,7 @@ type TemplateFunctions struct {
 	tags           sets.String
 }
 
-// This will define the available functions we can use in our YAML models
+// AddTo defines the available functions we can use in our YAML models.
 // If we are trying to get a new function implemented it MUST
 // be defined here.
 func (tf *TemplateFunctions) AddTo(dest template.FuncMap, secretStore fi.SecretStore) (err error) {
@@ -100,22 +100,23 @@ func (tf *TemplateFunctions) AddTo(dest template.FuncMap, secretStore fi.SecretS
 	dest["NodeLocalDNSClusterIP"] = func() string {
 		if tf.cluster.Spec.KubeProxy.ProxyMode == "ipvs" {
 			return tf.cluster.Spec.KubeDNS.ServerIP
-		} else {
-			return "__PILLAR__CLUSTER__DNS__"
 		}
+		return "__PILLAR__CLUSTER__DNS__"
 	}
 	dest["NodeLocalDNSServerIP"] = func() string {
 		if tf.cluster.Spec.KubeProxy.ProxyMode == "ipvs" {
 			return ""
-		} else {
-			return tf.cluster.Spec.KubeDNS.ServerIP
 		}
+		return tf.cluster.Spec.KubeDNS.ServerIP
+	}
+	dest["NodeLocalDNSHealthCheck"] = func() string {
+		return fmt.Sprintf("%d", wellknownports.NodeLocalDNSHealthCheck)
 	}
 
 	dest["KopsControllerArgv"] = tf.KopsControllerArgv
 	dest["KopsControllerConfig"] = tf.KopsControllerConfig
-	dest["DnsControllerArgv"] = tf.DnsControllerArgv
-	dest["ExternalDnsArgv"] = tf.ExternalDnsArgv
+	dest["DnsControllerArgv"] = tf.DNSControllerArgv
+	dest["ExternalDnsArgv"] = tf.ExternalDNSArgv
 	dest["CloudControllerConfigArgv"] = tf.CloudControllerConfigArgv
 	// TODO: Only for GCE?
 	dest["EncodeGCELabel"] = gce.EncodeGCELabel
@@ -163,6 +164,20 @@ func (tf *TemplateFunctions) AddTo(dest template.FuncMap, secretStore fi.SecretS
 		}
 
 		dest["WeaveSecret"] = func() string { return weavesecretString }
+	}
+
+	if tf.cluster.Spec.Networking != nil && tf.cluster.Spec.Networking.Cilium != nil {
+		ciliumsecretString := ""
+		ciliumsecret, _ := secretStore.Secret("ciliumpassword")
+		if ciliumsecret != nil {
+			ciliumsecretString, err = ciliumsecret.AsString()
+			if err != nil {
+				return err
+			}
+			klog.V(4).Info("Cilium secret function successfully registered")
+		}
+
+		dest["CiliumSecret"] = func() string { return ciliumsecretString }
 	}
 
 	return nil
@@ -254,8 +269,8 @@ func (tf *TemplateFunctions) CloudControllerConfigArgv() ([]string, error) {
 	return argv, nil
 }
 
-// DnsControllerArgv returns the args to the DNS controller
-func (tf *TemplateFunctions) DnsControllerArgv() ([]string, error) {
+// DNSControllerArgv returns the args to the DNS controller
+func (tf *TemplateFunctions) DNSControllerArgv() ([]string, error) {
 	var argv []string
 
 	argv = append(argv, "/usr/bin/dns-controller")
@@ -340,9 +355,6 @@ func (tf *TemplateFunctions) DnsControllerArgv() ([]string, error) {
 			argv = append(argv, "--dns=google-clouddns")
 		case kops.CloudProviderDO:
 			argv = append(argv, "--dns=digitalocean")
-		case kops.CloudProviderVSphere:
-			argv = append(argv, "--dns=coredns")
-			argv = append(argv, "--dns-server="+*tf.cluster.Spec.CloudConfig.VSphereCoreDNSServer)
 
 		default:
 			return nil, fmt.Errorf("unhandled cloudprovider %q", tf.cluster.Spec.CloudProvider)
@@ -398,7 +410,7 @@ func (tf *TemplateFunctions) KopsControllerArgv() ([]string, error) {
 	return argv, nil
 }
 
-func (tf *TemplateFunctions) ExternalDnsArgv() ([]string, error) {
+func (tf *TemplateFunctions) ExternalDNSArgv() ([]string, error) {
 	var argv []string
 
 	cloudProvider := tf.cluster.Spec.CloudProvider

@@ -27,10 +27,10 @@ import (
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/util"
 	"k8s.io/kops/pkg/apis/nodeup"
-	"k8s.io/kops/pkg/kubeconfig"
 	"k8s.io/kops/pkg/systemd"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
+	"k8s.io/kops/util/pkg/architectures"
 	"k8s.io/kops/util/pkg/vfs"
 	"k8s.io/utils/mount"
 
@@ -42,9 +42,10 @@ import (
 
 // NodeupModelContext is the context supplied the nodeup tasks
 type NodeupModelContext struct {
-	Architecture  Architecture
+	Architecture  architectures.Architecture
 	Assets        *fi.AssetStore
 	Cluster       *kops.Cluster
+	ConfigBase    vfs.Path
 	Distribution  distros.Distribution
 	InstanceGroup *kops.InstanceGroup
 	KeyStore      fi.CAStore
@@ -79,11 +80,9 @@ func (c *NodeupModelContext) SSLHostPaths() []string {
 	paths := []string{"/etc/ssl", "/etc/pki/tls", "/etc/pki/ca-trust"}
 
 	switch c.Distribution {
-	case distros.DistributionCoreOS:
-		// Because /usr is read-only on CoreOS, we can't have any new directories; docker will try (and fail) to create them
-		// TODO: Just check if the directories exist?
-		paths = append(paths, "/usr/share/ca-certificates")
 	case distros.DistributionFlatcar:
+		// Because /usr is read-only on Flatcar, we can't have any new directories; docker will try (and fail) to create them
+		// TODO: Just check if the directories exist?
 		paths = append(paths, "/usr/share/ca-certificates")
 	case distros.DistributionContainerOS:
 		paths = append(paths, "/usr/share/ca-certificates")
@@ -171,12 +170,6 @@ func (c *NodeupModelContext) PathSrvSshproxy() string {
 	}
 }
 
-// CNIBinDir returns the path for the CNI binaries
-func (c *NodeupModelContext) CNIBinDir() string {
-	// We used to map this on a per-distro basis, but this can require CNI manifests to be distro aware
-	return "/opt/cni/bin/"
-}
-
 // KubeletBootstrapKubeconfig is the path the bootstrap config file
 func (c *NodeupModelContext) KubeletBootstrapKubeconfig() string {
 	path := c.Cluster.Spec.Kubelet.BootstrapKubeconfig
@@ -199,24 +192,46 @@ func (c *NodeupModelContext) KubeletKubeConfig() string {
 	return "/var/lib/kubelet/kubeconfig"
 }
 
-// CNIConfDir returns the CNI directory
-func (c *NodeupModelContext) CNIConfDir() string {
-	return "/etc/cni/net.d/"
+// BuildIssuedKubeconfig generates a kubeconfig with a locally issued client certificate.
+func (c *NodeupModelContext) BuildIssuedKubeconfig(name string, subject nodetasks.PKIXName, ctx *fi.ModelBuilderContext) *fi.TaskDependentResource {
+	issueCert := &nodetasks.IssueCert{
+		Name:    name,
+		Signer:  fi.CertificateIDCA,
+		Type:    "client",
+		Subject: subject,
+	}
+	ctx.AddTask(issueCert)
+	certResource, keyResource, caResource := issueCert.GetResources()
+
+	kubeConfig := &nodetasks.KubeConfig{
+		Name: name,
+		Cert: certResource,
+		Key:  keyResource,
+		CA:   caResource,
+	}
+	if c.IsMaster {
+		// @note: use https even for local connections, so we can turn off the insecure port
+		kubeConfig.ServerURL = "https://127.0.0.1"
+	} else {
+		kubeConfig.ServerURL = "https://" + c.Cluster.Spec.MasterInternalName
+	}
+	ctx.AddTask(kubeConfig)
+	return kubeConfig.GetConfig()
 }
 
 // BuildPKIKubeconfig generates a kubeconfig
 func (c *NodeupModelContext) BuildPKIKubeconfig(name string) (string, error) {
-	ca, err := c.FindCert(fi.CertificateId_CA)
+	ca, err := c.GetCert(fi.CertificateIDCA)
 	if err != nil {
 		return "", err
 	}
 
-	cert, err := c.FindCert(name)
+	cert, err := c.GetCert(name)
 	if err != nil {
 		return "", err
 	}
 
-	key, err := c.FindPrivateKey(name)
+	key, err := c.GetPrivateKey(name)
 	if err != nil {
 		return "", err
 	}
@@ -226,54 +241,29 @@ func (c *NodeupModelContext) BuildPKIKubeconfig(name string) (string, error) {
 
 // BuildKubeConfig is responsible for building a kubeconfig
 func (c *NodeupModelContext) BuildKubeConfig(username string, ca, certificate, privateKey []byte) (string, error) {
-	user := kubeconfig.KubectlUser{
-		ClientCertificateData: certificate,
-		ClientKeyData:         privateKey,
+	kubeConfig := &nodetasks.KubeConfig{
+		Name: username,
+		Cert: fi.NewBytesResource(certificate),
+		Key:  fi.NewBytesResource(privateKey),
+		CA:   fi.NewBytesResource(ca),
 	}
-	cluster := kubeconfig.KubectlCluster{
-		CertificateAuthorityData: ca,
-	}
-
 	if c.IsMaster {
 		// @note: use https even for local connections, so we can turn off the insecure port
-		cluster.Server = "https://127.0.0.1"
+		kubeConfig.ServerURL = "https://127.0.0.1"
 	} else {
-		cluster.Server = "https://" + c.Cluster.Spec.MasterInternalName
+		kubeConfig.ServerURL = "https://" + c.Cluster.Spec.MasterInternalName
 	}
 
-	config := &kubeconfig.KubectlConfig{
-		ApiVersion: "v1",
-		Kind:       "Config",
-		Users: []*kubeconfig.KubectlUserWithName{
-			{
-				Name: username,
-				User: user,
-			},
-		},
-		Clusters: []*kubeconfig.KubectlClusterWithName{
-			{
-				Name:    "local",
-				Cluster: cluster,
-			},
-		},
-		Contexts: []*kubeconfig.KubectlContextWithName{
-			{
-				Name: "service-account-context",
-				Context: kubeconfig.KubectlContext{
-					Cluster: "local",
-					User:    username,
-				},
-			},
-		},
-		CurrentContext: "service-account-context",
-	}
-
-	yaml, err := kops.ToRawYaml(config)
+	err := kubeConfig.Run(nil)
 	if err != nil {
-		return "", fmt.Errorf("error marshaling kubeconfig to yaml: %v", err)
+		return "", err
 	}
 
-	return string(yaml), nil
+	config, err := fi.ResourceAsString(kubeConfig.GetConfig())
+	if err != nil {
+		return "", err
+	}
+	return config, nil
 }
 
 // IsKubernetesGTE checks if the version is greater-than-or-equal
@@ -342,16 +332,6 @@ func (c *NodeupModelContext) UseEtcdTLSAuth() bool {
 	return false
 }
 
-// UsesCNI checks if the cluster has CNI configured
-func (c *NodeupModelContext) UsesCNI() bool {
-	networking := c.Cluster.Spec.Networking
-	if networking == nil || networking.Classic != nil {
-		return false
-	}
-
-	return true
-}
-
 // UseNodeAuthorization checks if have a node authorization policy
 func (c *NodeupModelContext) UseNodeAuthorization() bool {
 	return c.Cluster.Spec.NodeAuthorization != nil
@@ -368,7 +348,8 @@ func (c *NodeupModelContext) UseNodeAuthorizer() bool {
 
 // UsesSecondaryIP checks if the CNI in use attaches secondary interfaces to the host.
 func (c *NodeupModelContext) UsesSecondaryIP() bool {
-	return (c.Cluster.Spec.Networking.CNI != nil && c.Cluster.Spec.Networking.CNI.UsesSecondaryIP) || c.Cluster.Spec.Networking.AmazonVPC != nil || c.Cluster.Spec.Networking.LyftVPC != nil || (c.Cluster.Spec.Networking.Cilium != nil && c.Cluster.Spec.Networking.Cilium.Ipam == kops.CiliumIpamEni)
+	return (c.Cluster.Spec.Networking.CNI != nil && c.Cluster.Spec.Networking.CNI.UsesSecondaryIP) || c.Cluster.Spec.Networking.AmazonVPC != nil || c.Cluster.Spec.Networking.LyftVPC != nil ||
+		(c.Cluster.Spec.Networking.Cilium != nil && c.Cluster.Spec.Networking.Cilium.Ipam == kops.CiliumIpamEni)
 }
 
 // UseBootstrapTokens checks if we are using bootstrap tokens
@@ -410,9 +391,6 @@ func (c *NodeupModelContext) UseSecureKubelet() bool {
 // KubectlPath returns distro based path for kubectl
 func (c *NodeupModelContext) KubectlPath() string {
 	kubeletCommand := "/usr/local/bin"
-	if c.Distribution == distros.DistributionCoreOS {
-		kubeletCommand = "/opt/bin"
-	}
 	if c.Distribution == distros.DistributionFlatcar {
 		kubeletCommand = "/opt/bin"
 	}
@@ -572,28 +550,78 @@ func EvaluateHostnameOverride(hostnameOverride string) (string, error) {
 	return *(result.Reservations[0].Instances[0].PrivateDnsName), nil
 }
 
-// FindCert is a helper method to retrieving a certificate from the store
-func (c *NodeupModelContext) FindCert(name string) ([]byte, error) {
+// GetCert is a helper method to retrieve a certificate from the store
+func (c *NodeupModelContext) GetCert(name string) ([]byte, error) {
 	cert, err := c.KeyStore.FindCert(name)
 	if err != nil {
 		return []byte{}, fmt.Errorf("error fetching certificate: %v from keystore: %v", name, err)
 	}
 	if cert == nil {
-		return []byte{}, fmt.Errorf("unable to found certificate: %s", name)
+		return []byte{}, fmt.Errorf("unable to find certificate: %s", name)
 	}
 
 	return cert.AsBytes()
 }
 
-// FindPrivateKey is a helper method to retrieving a private key from the store
-func (c *NodeupModelContext) FindPrivateKey(name string) ([]byte, error) {
+// GetPrivateKey is a helper method to retrieve a private key from the store
+func (c *NodeupModelContext) GetPrivateKey(name string) ([]byte, error) {
 	key, err := c.KeyStore.FindPrivateKey(name)
 	if err != nil {
 		return []byte{}, fmt.Errorf("error fetching private key: %v from keystore: %v", name, err)
 	}
 	if key == nil {
-		return []byte{}, fmt.Errorf("unable to found private key: %s", name)
+		return []byte{}, fmt.Errorf("unable to find private key: %s", name)
 	}
 
 	return key.AsBytes()
+}
+
+func (b *NodeupModelContext) AddCNIBinAssets(c *fi.ModelBuilderContext, assetNames []string) error {
+	for _, assetName := range assetNames {
+		if err := b.addCNIBinAsset(c, assetName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *NodeupModelContext) addCNIBinAsset(c *fi.ModelBuilderContext, assetName string) error {
+	assetPath := ""
+	asset, err := b.Assets.Find(assetName, assetPath)
+	if err != nil {
+		return fmt.Errorf("error trying to locate asset %q: %v", assetName, err)
+	}
+	if asset == nil {
+		return fmt.Errorf("unable to locate asset %q", assetName)
+	}
+
+	c.AddTask(&nodetasks.File{
+		Path:     filepath.Join(b.CNIBinDir(), assetName),
+		Contents: asset,
+		Type:     nodetasks.FileType_File,
+		Mode:     fi.String("0755"),
+	})
+
+	return nil
+}
+
+// UsesCNI checks if the cluster has CNI configured
+func (c *NodeupModelContext) UsesCNI() bool {
+	networking := c.Cluster.Spec.Networking
+	if networking == nil || networking.Classic != nil {
+		return false
+	}
+
+	return true
+}
+
+// CNIBinDir returns the path for the CNI binaries
+func (c *NodeupModelContext) CNIBinDir() string {
+	// We used to map this on a per-distro basis, but this can require CNI manifests to be distro aware
+	return "/opt/cni/bin/"
+}
+
+// CNIConfDir returns the CNI directory
+func (c *NodeupModelContext) CNIConfDir() string {
+	return "/etc/cni/net.d/"
 }

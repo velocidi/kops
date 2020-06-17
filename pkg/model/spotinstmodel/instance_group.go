@@ -26,7 +26,6 @@ import (
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/pkg/model"
-	"k8s.io/kops/pkg/model/awsmodel"
 	"k8s.io/kops/pkg/model/defaults"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awstasks"
@@ -34,6 +33,11 @@ import (
 )
 
 const (
+	// InstanceGroupLabelHybrid is the metadata label used on the instance group
+	// to specify that the Spotinst provider should be used to upon creation.
+	InstanceGroupLabelHybrid  = "spotinst.io/hybrid"
+	InstanceGroupLabelManaged = "spotinst.io/managed" // for backward compatibility
+
 	// InstanceGroupLabelSpotPercentage is the metadata label used on the
 	// instance group to specify the percentage of Spot instances that
 	// should spin up from the target capacity.
@@ -52,6 +56,11 @@ const (
 	// instance group to specify whether fallback to on-demand instances should
 	// be enabled.
 	InstanceGroupLabelFallbackToOnDemand = "spotinst.io/fallback-to-ondemand"
+
+	// InstanceGroupLabelDrainingTimeout is the metadata label used on the
+	// instance group to specify a period of time, in seconds, after a node
+	// is marked for termination during which on running pods remains active.
+	InstanceGroupLabelDrainingTimeout = "spotinst.io/draining-timeout"
 
 	// InstanceGroupLabelGracePeriod is the metadata label used on the
 	// instance group to specify a period of time, in seconds, that Ocean
@@ -101,7 +110,7 @@ const (
 
 // InstanceGroupModelBuilder configures InstanceGroup objects
 type InstanceGroupModelBuilder struct {
-	*awsmodel.AWSModelContext
+	*model.KopsModelContext
 
 	BootstrapScript   *model.BootstrapScript
 	Lifecycle         *fi.Lifecycle
@@ -115,8 +124,16 @@ func (b *InstanceGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 	var err error
 
 	for _, ig := range b.InstanceGroups {
-		klog.V(2).Infof("Building instance group: %q", b.AutoscalingGroupName(ig))
+		name := b.AutoscalingGroupName(ig)
 
+		if featureflag.SpotinstHybrid.Enabled() {
+			if !HybridInstanceGroup(ig) {
+				klog.V(2).Infof("Skipping instance group: %q", name)
+				continue
+			}
+		}
+
+		klog.V(2).Infof("Building instance group: %q", name)
 		switch ig.Spec.Role {
 
 		// Create both Master and Bastion instance groups as Elastigroups.
@@ -186,6 +203,12 @@ func (b *InstanceGroupModelBuilder) buildElastigroup(c *fi.ModelBuilderContext, 
 
 		case InstanceGroupLabelFallbackToOnDemand:
 			group.FallbackToOnDemand, err = parseBool(v)
+			if err != nil {
+				return err
+			}
+
+		case InstanceGroupLabelDrainingTimeout:
+			group.DrainingTimeout, err = parseInt(v)
 			if err != nil {
 				return err
 			}
@@ -362,6 +385,12 @@ func (b *InstanceGroupModelBuilder) buildOcean(c *fi.ModelBuilderContext, igs ..
 
 		case InstanceGroupLabelGracePeriod:
 			ocean.GracePeriod, err = parseInt(v)
+			if err != nil {
+				return err
+			}
+
+		case InstanceGroupLabelDrainingTimeout:
+			ocean.DrainingTimeout, err = parseInt(v)
 			if err != nil {
 				return err
 			}
@@ -642,7 +671,7 @@ func (b *InstanceGroupModelBuilder) buildRootVolumeOpts(ig *kops.InstanceGroup) 
 	{
 		typ := fi.StringValue(ig.Spec.RootVolumeType)
 		if typ == "" {
-			typ = awsmodel.DefaultVolumeType
+			typ = "gp2"
 		}
 		opts.Type = fi.String(typ)
 	}
@@ -912,4 +941,17 @@ func defaultSpotPercentage(ig *kops.InstanceGroup) *float64 {
 	}
 
 	return &percentage
+}
+
+// HybridInstanceGroup indicates whether the instance group labeled with
+// a metadata label `spotinst.io/hybrid` which means the Spotinst provider
+// should be used to upon creation if the `SpotinstHybrid` feature flag is on.
+func HybridInstanceGroup(ig *kops.InstanceGroup) bool {
+	v, ok := ig.ObjectMeta.Labels[InstanceGroupLabelHybrid]
+	if !ok {
+		v = ig.ObjectMeta.Labels[InstanceGroupLabelManaged]
+	}
+
+	hybrid, _ := strconv.ParseBool(v)
+	return hybrid
 }

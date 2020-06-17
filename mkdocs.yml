@@ -2,7 +2,7 @@ site_name: Kubernetes Operations - kops
 # strict: true
 repo_name: 'kubernetes/kops'
 repo_url: 'https://github.com/kubernetes/kops'
-site_url: 'https://kubernetes-kops.netlify.com'
+site_url: 'https://kops.sigs.k8s.io'
 markdown_extensions:
   - admonition
   - codehilite
@@ -15,10 +15,11 @@ markdown_extensions:
       permalink: ' ¶'
 theme:
   name: material
-  feature:
-    tabs: true
-  logo:
-    icon: 'public'   # globe icon
+  features:
+    - tabs
+  icon:
+    logo: 'material/earth'
+  favicon: 'img/logo-notext.svg'
   palette:
     primary: 'teal'
     accent: 'green'
@@ -39,6 +40,7 @@ nav:
     - Deploying to GCE: "getting_started/gce.md"
     - Deploying to OpenStack - Beta: "getting_started/openstack.md"
     - Deploying to Digital Ocean - Alpha: "getting_started/digitalocean.md"
+    - Deploying to Spot Ocean: "getting_started/spot-ocean.md"
     - kops Commands: "getting_started/commands.md"
     - kops Arguments: "getting_started/arguments.md"
     - kubectl usage: "getting_started/kubectl.md"
@@ -81,6 +83,7 @@ nav:
     - Service Account Token Volume: "operations/service_account_token_volumes.md"
     - Moving from a Single Master to Multiple HA Masters: "single-to-multi-master.md"
     - Running kops in a CI environment: "continuous_integration.md"
+    - Gossip DNS: "gossip.md"
     - etcd:
       - etcd administration: "operations/etcd_administration.md"
       - etcd backup, restore and encryption: "operations/etcd_backup_restore_encryption.md"
@@ -88,7 +91,17 @@ nav:
       - etcd3 Migration: "etcd3-migration.md"
 
   - Networking:
-    - Networking Overview including CNI: "networking.md"
+    - Networking Overview: "networking.md"
+    - CNI:
+      - AWS VPC: "networking/aws-vpc.md"
+      - Calico: "networking/calico.md"
+      - Canal: "networking/canal.md"
+      - Cilium: "networking/cilium.md"
+      - Flannel: "networking/flannel.md"
+      - Kube-Router: "networking/kube-router.md"
+      - Lyft VPC: "networking/lyft-vpc.md"
+      - Romana: "networking/romana.md"
+      - Weave: "networking/weave.md"
     - Run kops in an existing VPC: "run_in_existing_vpc.md"
     - Supported network topologies: "topology.md"
     - Subdomain setup: "creating_subdomain.md"
@@ -107,7 +120,6 @@ nav:
     - Philosophy: "philosophy.md"
     - State store: "state.md"
     - AWS China: "aws-china.md"
-    - Calico v3: "calico-v3.md"
     - Custom CA: "custom_ca.md"
     - Horizontal Pod Autoscaling: "horizontal_pod_autoscaling.md"
     - Egress Proxy: "http_proxy.md"
@@ -120,11 +132,8 @@ nav:
     - Building: "development/building.md"
     - Adding a feature: "development/adding_a_feature.md"
     - Testing: "development/testing.md"
-    - Releasing: "development/release.md"
     - New Kubernetes Version: "development/new_kubernetes_version.md"
     - Developing using Docker: "development/Docker.md"
-    - Development with vSphere: "vsphere-dev.md"
-    - vSphere support status: "vsphere-development-status.md"
     - Documentation Guidelines: "development/documentation.md"
     - Hack Directory: "development/hack.md"
     - How to update `kops` API: "development/api_updates.md"
@@ -137,6 +146,8 @@ nav:
     - Vendoring: "development/vendoring.md"
     - Ports: "development/ports.md"
   - Releases:
+    - 1.18-beta: releases/1.18-NOTES.md
+    - 1.17: releases/1.17-NOTES.md
     - 1.16: releases/1.16-NOTES.md
     - 1.15: releases/1.15-NOTES.md
     - 1.14: releases/1.14-NOTES.md

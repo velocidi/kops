@@ -47,13 +47,13 @@ func (l *Literal) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&l.Value)
 }
 
-func LiteralExpression(s string) *Literal {
-	return &Literal{Value: s}
-}
-
-func LiteralFileExpression(modulePath string) *Literal {
+func LiteralFileExpression(modulePath string, base64 bool) *Literal {
+	fn := "file"
+	if base64 {
+		fn = "filebase64"
+	}
 	return &Literal{
-		Value:    fmt.Sprintf("${file(%q)}", modulePath),
+		Value:    fmt.Sprintf("${%v(%q)}", fn, modulePath),
 		FilePath: modulePath,
 	}
 }

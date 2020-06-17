@@ -142,11 +142,11 @@ func runCompletionBash(out io.Writer, cmd *cobra.Command) error {
 }
 
 func runCompletionZsh(out io.Writer, cmd *cobra.Command) error {
-	zsh_head := "#compdef kops\n"
+	zshHead := "#compdef kops\n"
 
-	out.Write([]byte(zsh_head))
+	out.Write([]byte(zshHead))
 
-	zsh_initialization := `
+	zshInitialization := `
 __kops_bash_source() {
 	alias shopt=':'
 	alias _expand=_bash_expand
@@ -190,13 +190,7 @@ __kops_compgen() {
 __kops_compopt() {
 	true # don't do anything. Not supported by bashcompinit in zsh
 }
-__kops_declare() {
-	if [ "$1" == "-F" ]; then
-		whence -w "$@"
-	else
-		builtin declare "$@"
-	fi
-}
+
 __kops_ltrim_colon_completions()
 {
 	if [[ "$1" == *:* && "$COMP_WORDBREAKS" == *:* ]]; then
@@ -274,22 +268,22 @@ __kops_convert_bash_to_zsh() {
 	-e "s/${LWORD}__ltrim_colon_completions${RWORD}/__kops_ltrim_colon_completions/g" \
 	-e "s/${LWORD}compgen${RWORD}/__kops_compgen/g" \
 	-e "s/${LWORD}compopt${RWORD}/__kops_compopt/g" \
-	-e "s/${LWORD}declare${RWORD}/__kops_declare/g" \
+	-e "s/${LWORD}declare${RWORD}/builtin declare/g" \
 	-e "s/\\\$(type${RWORD}/\$(__kops_type/g" \
 	<<'BASH_COMPLETION_EOF'
 `
-	out.Write([]byte(zsh_initialization))
+	out.Write([]byte(zshInitialization))
 
 	buf := new(bytes.Buffer)
 	cmd.GenBashCompletion(buf)
 	out.Write(buf.Bytes())
 
-	zsh_tail := `
+	zshTail := `
 BASH_COMPLETION_EOF
 }
 __kops_bash_source <(__kops_convert_bash_to_zsh)
 _complete kops 2>/dev/null
 `
-	out.Write([]byte(zsh_tail))
+	out.Write([]byte(zshTail))
 	return nil
 }

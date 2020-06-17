@@ -19,6 +19,7 @@ package validation
 import (
 	"testing"
 
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/upup/pkg/fi"
@@ -88,5 +89,135 @@ func TestValidateInstanceProfile(t *testing.T) {
 				t.Errorf("did not find expected error %q", g.ExpectedDetail)
 			}
 		}
+	}
+}
+
+func TestValidMasterInstanceGroup(t *testing.T) {
+	grid := []struct {
+		Cluster        *kops.Cluster
+		IG             *kops.InstanceGroup
+		ExpectedErrors int
+		Description    string
+	}{
+		{
+			Cluster: &kops.Cluster{
+				Spec: kops.ClusterSpec{
+					EtcdClusters: []*kops.EtcdClusterSpec{
+						{
+							Name: "main",
+							Members: []*kops.EtcdMemberSpec{
+								{
+									Name:          "a",
+									InstanceGroup: fi.String("eu-central-1a"),
+								},
+								{
+									Name:          "b",
+									InstanceGroup: fi.String("eu-central-1b"),
+								},
+								{
+									Name:          "c",
+									InstanceGroup: fi.String("eu-central-1c"),
+								},
+							},
+						},
+					},
+				},
+			},
+			IG: &kops.InstanceGroup{
+				ObjectMeta: v1.ObjectMeta{
+					Name: "eu-central-1a",
+				},
+				Spec: kops.InstanceGroupSpec{
+					Role: kops.InstanceGroupRoleMaster,
+				},
+			},
+			ExpectedErrors: 0,
+			Description:    "Valid instance group failed to validate",
+		},
+		{
+			Cluster: &kops.Cluster{
+				Spec: kops.ClusterSpec{
+					EtcdClusters: []*kops.EtcdClusterSpec{
+						{
+							Name: "main",
+							Members: []*kops.EtcdMemberSpec{
+								{
+									Name:          "a",
+									InstanceGroup: fi.String("eu-central-1a"),
+								},
+								{
+									Name:          "b",
+									InstanceGroup: fi.String("eu-central-1b"),
+								},
+								{
+									Name:          "c",
+									InstanceGroup: fi.String("eu-central-1c"),
+								},
+							},
+						},
+					},
+				},
+			},
+			IG: &kops.InstanceGroup{
+				ObjectMeta: v1.ObjectMeta{
+					Name: "eu-central-1d",
+				},
+				Spec: kops.InstanceGroupSpec{
+					Role: kops.InstanceGroupRoleMaster,
+				},
+			},
+			ExpectedErrors: 1,
+			Description:    "Master IG without etcd member validated",
+		},
+	}
+
+	for _, g := range grid {
+		errList := ValidateMasterInstanceGroup(g.IG, g.Cluster)
+		if len(errList) != g.ExpectedErrors {
+			t.Error(g.Description)
+		}
+	}
+
+}
+
+func TestValidBootDevice(t *testing.T) {
+
+	cluster := &kops.Cluster{
+		Spec: kops.ClusterSpec{
+			CloudProvider: "aws",
+		},
+	}
+	grid := []struct {
+		volumeType string
+		expected   []string
+	}{
+		{
+			volumeType: "gp2",
+		},
+		{
+			volumeType: "io1",
+		},
+		{
+			volumeType: "st1",
+			expected:   []string{"Unsupported value::spec.rootVolumeType"},
+		},
+		{
+			volumeType: "sc1",
+			expected:   []string{"Unsupported value::spec.rootVolumeType"},
+		},
+	}
+
+	for _, g := range grid {
+		ig := &kops.InstanceGroup{
+			ObjectMeta: v1.ObjectMeta{
+				Name: "some-ig",
+			},
+			Spec: kops.InstanceGroupSpec{
+				Role:           "Node",
+				RootVolumeType: fi.String(g.volumeType),
+			},
+		}
+		errs := CrossValidateInstanceGroup(ig, cluster, nil)
+		testErrors(t, g.volumeType, errs, g.expected)
 	}
 }

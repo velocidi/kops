@@ -30,7 +30,7 @@ const (
 	EtcdEventsGRPC = 3997
 
 	EtcdCiliumQuarantinedClientPort = 3992
-	EtcdCiliumGRPC                  = 3993
+	EtcdCiliumGRPC                  = 3991
 
 	// DNSControllerGossipWeaveMesh is the port where dns-controller listens for the weave-mesh backend gossip
 	DNSControllerGossipWeaveMesh = 3998
@@ -43,6 +43,14 @@ const (
 
 	// DNSControllerGossipMemberlist is the port where dns-controller listens for the memberlist-backed gossip
 	DNSControllerGossipMemberlist = 3993
+
+	// 4001 is etcd main, 4002 is etcd events, 4003 is etcd cilium
+
+	// KubeAPIServerHealthCheck is the port where kube-apiserver-healthcheck listens.
+	KubeAPIServerHealthCheck = 3990
+
+	// NodeLocalDNSHealthCheck is the port where the node-local-dns health check listens.
+	NodeLocalDNSHealthCheck = 3989
 )
 
 type PortRange struct {

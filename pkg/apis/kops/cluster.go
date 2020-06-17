@@ -191,8 +191,6 @@ type ClusterSpec struct {
 	SysctlParameters []string `json:"sysctlParameters,omitempty"`
 	// RollingUpdate defines the default rolling-update settings for instance groups
 	RollingUpdate *RollingUpdate `json:"rollingUpdate,omitempty"`
-	// GCEServiceAccount specifies the service account with which the GCE VM runs
-	GCEServiceAccount string `json:"gceServiceAccount,omitempty"`
 }
 
 // NodeAuthorizationSpec is used to node authorization
@@ -607,9 +605,7 @@ func (c *Cluster) FillDefaults() error {
 
 // fillClusterSpecNetworking provides default value if c.Spec.NetworkingSpec is nil
 func (c *Cluster) fillClusterSpecNetworkingSpec() {
-	if c.Spec.Networking.Classic != nil {
-		// OK
-	} else if c.Spec.Networking.Kubenet != nil {
+	if c.Spec.Networking.Kubenet != nil {
 		// OK
 	} else if c.Spec.Networking.CNI != nil {
 		// OK
@@ -626,8 +622,6 @@ func (c *Cluster) fillClusterSpecNetworkingSpec() {
 	} else if c.Spec.Networking.Canal != nil {
 		// OK
 	} else if c.Spec.Networking.Kuberouter != nil {
-		// OK
-	} else if c.Spec.Networking.Romana != nil {
 		// OK
 	} else if c.Spec.Networking.AmazonVPC != nil {
 		// OK

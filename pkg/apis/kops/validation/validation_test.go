@@ -208,7 +208,12 @@ func TestValidateKubeAPIServer(t *testing.T) {
 		},
 	}
 	for _, g := range grid {
-		errs := validateKubeAPIServer(&g.Input, field.NewPath("KubeAPIServer"))
+		cluster := &kops.Cluster{
+			Spec: kops.ClusterSpec{
+				KubernetesVersion: "1.16.0",
+			},
+		}
+		errs := validateKubeAPIServer(&g.Input, cluster, field.NewPath("KubeAPIServer"))
 
 		testErrors(t, g.Input, errs, g.ExpectedErrors)
 
@@ -287,7 +292,7 @@ func Test_Validate_Networking_Flannel(t *testing.T) {
 		cluster := &kops.Cluster{}
 		cluster.Spec.Networking = networking
 
-		errs := validateNetworking(&cluster.Spec, networking, field.NewPath("networking"))
+		errs := validateNetworking(cluster, networking, field.NewPath("networking"))
 		testErrors(t, g.Input, errs, g.ExpectedErrors)
 	}
 }
@@ -332,12 +337,24 @@ func Test_Validate_AdditionalPolicies(t *testing.T) {
 	}
 	for _, g := range grid {
 		clusterSpec := &kops.ClusterSpec{
+			KubernetesVersion:  "1.17.0",
 			AdditionalPolicies: &g.Input,
 			Subnets: []kops.ClusterSubnetSpec{
 				{Name: "subnet1"},
 			},
+			EtcdClusters: []*kops.EtcdClusterSpec{
+				{
+					Name: "main",
+					Members: []*kops.EtcdMemberSpec{
+						{
+							Name:          "us-test-1a",
+							InstanceGroup: fi.String("master-us-test-1a"),
+						},
+					},
+				},
+			},
 		}
-		errs := validateClusterSpec(clusterSpec, field.NewPath("spec"))
+		errs := validateClusterSpec(clusterSpec, &kops.Cluster{Spec: *clusterSpec}, field.NewPath("spec"))
 		testErrors(t, g.Input, errs, g.ExpectedErrors)
 	}
 }
@@ -396,10 +413,217 @@ func Test_Validate_Calico(t *testing.T) {
 			},
 			ExpectedErrors: []string{"Forbidden::calico.majorVersion"},
 		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv4AutoDetectionMethod: "first-found",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv6AutoDetectionMethod: "first-found",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv4AutoDetectionMethod: "can-reach=8.8.8.8",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv6AutoDetectionMethod: "can-reach=2001:4860:4860::8888",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv4AutoDetectionMethod: "bogus",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+			ExpectedErrors: []string{"Invalid value::calico.ipv4AutoDetectionMethod"},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv6AutoDetectionMethod: "bogus",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+			ExpectedErrors: []string{"Invalid value::calico.ipv6AutoDetectionMethod"},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv6AutoDetectionMethod: "interface=",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+			ExpectedErrors: []string{"Invalid value::calico.ipv6AutoDetectionMethod"},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv4AutoDetectionMethod: "interface=en.*,eth0",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv6AutoDetectionMethod: "skip-interface=en.*,eth0",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv4AutoDetectionMethod: "interface=(,en1",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+			ExpectedErrors: []string{"Invalid value::calico.ipv4AutoDetectionMethod"},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv4AutoDetectionMethod: "interface=foo=bar",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+			ExpectedErrors: []string{"Invalid value::calico.ipv4AutoDetectionMethod"},
+		},
+		{
+			Input: caliInput{
+				Calico: &kops.CalicoNetworkingSpec{
+					IPv4AutoDetectionMethod: "=en0,eth.*",
+				},
+				Etcd: &kops.EtcdClusterSpec{},
+			},
+			ExpectedErrors: []string{"Invalid value::calico.ipv4AutoDetectionMethod"},
+		},
 	}
 	for _, g := range grid {
 		errs := validateNetworkingCalico(g.Input.Calico, g.Input.Etcd, field.NewPath("calico"))
 		testErrors(t, g.Input, errs, g.ExpectedErrors)
+	}
+}
+
+func Test_Validate_Cilium(t *testing.T) {
+	grid := []struct {
+		Cilium         kops.CiliumNetworkingSpec
+		Spec           kops.ClusterSpec
+		ExpectedErrors []string
+	}{
+		{
+			Cilium: kops.CiliumNetworkingSpec{},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				Ipam: "crd",
+			},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				DisableMasquerade: true,
+				Ipam:              "eni",
+			},
+			Spec: kops.ClusterSpec{
+				CloudProvider: "aws",
+			},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				DisableMasquerade: true,
+				Ipam:              "eni",
+			},
+			Spec: kops.ClusterSpec{
+				CloudProvider: "aws",
+			},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				Ipam: "foo",
+			},
+			ExpectedErrors: []string{"Unsupported value::cilium.ipam"},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				Ipam: "eni",
+			},
+			Spec: kops.ClusterSpec{
+				CloudProvider: "aws",
+			},
+			ExpectedErrors: []string{"Forbidden::cilium.disableMasquerade"},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				DisableMasquerade: true,
+				Ipam:              "eni",
+			},
+			Spec: kops.ClusterSpec{
+				CloudProvider: "gce",
+			},
+			ExpectedErrors: []string{"Forbidden::cilium.ipam"},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				Version: "1.0",
+			},
+			Spec: kops.ClusterSpec{
+				KubernetesVersion: "1.11.0",
+			},
+			ExpectedErrors: []string{"Invalid value::cilium.version"},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				Version: "1.7.0",
+			},
+			Spec: kops.ClusterSpec{
+				KubernetesVersion: "1.11.0",
+			},
+			ExpectedErrors: []string{"Forbidden::cilium.version"},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				Version: "1.7.0-rc1",
+			},
+			Spec: kops.ClusterSpec{
+				KubernetesVersion: "1.11.0",
+			},
+			ExpectedErrors: []string{"Forbidden::cilium.version"},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				Version: "1.7",
+			},
+			Spec: kops.ClusterSpec{
+				KubernetesVersion: "1.12.0",
+			},
+		},
+	}
+	for _, g := range grid {
+		g.Spec.Networking = &kops.NetworkingSpec{
+			Cilium: &g.Cilium,
+		}
+		cluster := &kops.Cluster{
+			Spec: g.Spec,
+		}
+		errs := validateNetworkingCilium(cluster, g.Spec.Networking.Cilium, field.NewPath("cilium"))
+		testErrors(t, g.Spec, errs, g.ExpectedErrors)
 	}
 }
 

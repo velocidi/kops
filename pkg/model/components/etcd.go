@@ -24,7 +24,7 @@ import (
 	"k8s.io/kops/upup/pkg/fi/loader"
 )
 
-const DefaultBackupImage = "kopeio/etcd-backup:3.0.20200429"
+const DefaultBackupImage = "kopeio/etcd-backup:3.0.20200531"
 
 // EtcdOptionsBuilder adds options for etcd to the model
 type EtcdOptionsBuilder struct {
@@ -83,10 +83,8 @@ func (b *EtcdOptionsBuilder) BuildOptions(o interface{}) error {
 				c.Version = DefaultEtcd3Version_1_14
 			} else if b.IsKubernetesGTE("1.13") {
 				c.Version = DefaultEtcd3Version_1_13
-			} else if b.IsKubernetesGTE("1.11") {
-				c.Version = DefaultEtcd3Version_1_11
 			} else {
-				c.Version = DefaultEtcd2Version
+				c.Version = DefaultEtcd3Version_1_11
 			}
 		}
 

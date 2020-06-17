@@ -195,6 +195,10 @@ spec:
                     type: boolean
                   elbSecurityGroup:
                     type: string
+                  gceServiceAccount:
+                    description: GCEServiceAccount specifies the service account with
+                      which the GCE VM runs
+                    type: string
                   multizone:
                     description: GCE cloud-config options
                     type: boolean
@@ -265,19 +269,32 @@ spec:
                     description: Spotinst cloud-config specs
                     type: string
                   vSphereCoreDNSServer:
+                    description: VSphereCoreDNSServer is deprecated and will be removed
+                      in a later version
                     type: string
                   vSphereDatacenter:
+                    description: VShpereDatacenter is deprecated and will be removed
+                      in a later version
                     type: string
                   vSphereDatastore:
+                    description: VSphereDatastore is deprecated and will be removed
+                      in a later version
                     type: string
                   vSpherePassword:
+                    description: VSpherePassword is deprecated and will be removed
+                      in a later version
                     type: string
                   vSphereResourcePool:
+                    description: VSphereResourcePool is deprecated and will be removed
+                      in a later version
                     type: string
                   vSphereServer:
+                    description: VSphereServer is deprecated and will be removed in
+                      a later version
                     type: string
                   vSphereUsername:
-                    description: vSphere cloud-config specs
+                    description: VSphereUsername is deprecated and will be removed
+                      in a later version
                     type: string
                 type: object
               cloudControllerManager:
@@ -538,6 +555,9 @@ spec:
                     items:
                       type: string
                     type: array
+                  selinuxEnabled:
+                    description: SelinuxEnabled enables SELinux support
+                    type: boolean
                   skipInstall:
                     description: SkipInstall when set to true will prevent kops from
                       installing and modifying Docker in any way
@@ -773,10 +793,6 @@ spec:
                       type: array
                   type: object
                 type: array
-              gceServiceAccount:
-                description: GCEServiceAccount specifies the service account with
-                  which the GCE VM runs
-                type: string
               gossipConfig:
                 description: GossipConfig for the cluster assuming the use of gossip
                   DNS
@@ -1268,6 +1284,11 @@ spec:
                       issuer will assert this identifier in "iss" claim of issued
                       tokens. This value is a string or URI.
                     type: string
+                  serviceAccountJWKSURI:
+                    description: ServiceAccountJWKSURI overrides the path for the
+                      jwks document; this is useful when we are republishing the service
+                      account discovery information elsewhere.
+                    type: string
                   serviceAccountKeyFile:
                     description: File containing PEM-encoded x509 RSA or ECDSA private
                       or public keys, used to verify ServiceAccount tokens. The specified
@@ -1395,6 +1416,11 @@ spec:
                     items:
                       type: string
                     type: array
+                  disableAttachDetachReconcileSync:
+                    description: DisableAttachDetachReconcileSync disables the reconcile
+                      sync loop in the attach-detach controller. This can cause volumes
+                      to become mismatched with pods
+                    type: boolean
                   enableProfiling:
                     description: EnableProfiling enables profiling via web interface
                       host:port/debug/pprof/
@@ -2645,6 +2671,22 @@ spec:
                           binary Felix uses Default: Auto (other options: Legacy,
                           NFT)'
                         type: string
+                      ipv4AutoDetectionMethod:
+                        description: 'IPv4AutoDetectionMethod configures how Calico
+                          chooses the IP address used to route between nodes.  This
+                          should be set when the host has multiple interfaces and
+                          it is important to select the interface used. Options: "first-found"
+                          (default), "can-reach=DESTINATION", "interface=INTERFACE-REGEX",
+                          or "skip-interface=INTERFACE-REGEX"'
+                        type: string
+                      ipv6AutoDetectionMethod:
+                        description: 'IPv6AutoDetectionMethod configures how Calico
+                          chooses the IP address used to route between nodes.  This
+                          should be set when the host has multiple interfaces and
+                          it is important to select the interface used. Options: "first-found"
+                          (default), "can-reach=DESTINATION", "interface=INTERFACE-REGEX",
+                          or "skip-interface=INTERFACE-REGEX"'
+                        type: string
                       logSeverityScreen:
                         description: 'LogSeverityScreen lets us set the desired log
                           level. (Default: info)'
@@ -2872,6 +2914,10 @@ spec:
                         description: DisableMasquerade disables masquerading traffic
                           to external destinations behind the node IP.
                         type: boolean
+                      enableEncryption:
+                        description: 'EnableEncryption enables Cilium Encryption.
+                          Default: false'
+                        type: boolean
                       enableNodePort:
                         description: 'EnableNodePort replaces kube-proxy with Cilium''s
                           BPF implementation. Requires spec.kubeProxy.enabled be set
@@ -2898,14 +2944,12 @@ spec:
                           in the future. Setting this has no effect.
                         type: boolean
                       enableipv4:
-                        description: 'EnableIpv4 enables cluster IPv4 traffic. If
-                          both EnableIpv6 and EnableIpv4 are set to false then IPv4
-                          will be enabled. Default: false'
+                        description: EnableIpv4 is not implemented and may be removed
+                          in the future. Setting this has no effect.
                         type: boolean
                       enableipv6:
-                        description: 'EnableIpv6 enables cluster IPv6 traffic. If
-                          both EnableIpv6 and EnableIpv4 are set to false then IPv4
-                          will be enabled. Default: false'
+                        description: EnableIpv6 is not implemented and may be removed
+                          in the future. Setting this has no effect.
                         type: boolean
                       envoyLog:
                         description: EnvoyLog is not implemented and may be removed
@@ -3092,7 +3136,7 @@ spec:
                           removed in the future. Setting this has no effect.
                         type: integer
                       tunnel:
-                        description: 'Tunnel specifies the Cilium tunelling mode.
+                        description: 'Tunnel specifies the Cilium tunnelling mode.
                           Possible values are "vxlan", "geneve", or "disabled". Default:
                           vxlan'
                         type: string
@@ -3101,42 +3145,25 @@ spec:
                           the Cilium Operator.
                         type: string
                     required:
-                    - IPTablesRulesNoinstall
-                    - autoDirectNodeRoutes
-                    - bpfCTGlobalAnyMax
-                    - bpfCTGlobalTCPMax
-                    - clusterName
-                    - cniBinPath
-                    - enableNodePort
-                    - enableRemoteNodeIdentity
-                    - enableipv4
-                    - enableipv6
-                    - monitorAggregation
-                    - nodeInitBootstrapFile
-                    - preallocateBPFMaps
-                    - reconfigureKubelet
-                    - removeCbrBridge
-                    - restartPods
-                    - sidecarIstioProxyImage
-                    - toFqdnsEnablePoller
+                    - enableEncryption
                     type: object
                   classic:
                     description: ClassicNetworkingSpec is the specification of classic
-                      networking mode, integrated into kubernetes
+                      networking mode, integrated into kubernetes. Support been removed
+                      since kubernetes 1.4.
                     type: object
                   cni:
                     description: CNINetworkingSpec is the specification for networking
-                      that is implemented by a Daemonset Networking is not managed
-                      by kops - we can create options here that directly configure
-                      e.g. weave but this is useful for arbitrary network modes or
-                      for modes that don't need additional configuration.
+                      that is implemented by a user-provided Daemonset, which uses
+                      the CNI kubelet networking plugin.
                     properties:
                       usesSecondaryIP:
                         type: boolean
                     type: object
                   external:
                     description: ExternalNetworkingSpec is the specification for networking
-                      that is implemented by a Daemonset It also uses kubenet
+                      that is implemented by a user-provided Daemonset that uses the
+                      Kubenet kubelet networking plugin.
                     type: object
                   flannel:
                     description: FlannelNetworkingSpec declares that we want Flannel
@@ -3179,7 +3206,8 @@ spec:
                     type: object
                   romana:
                     description: RomanaNetworkingSpec declares that we want Romana
-                      networking
+                      networking Romana is deprecated as of kops 1.18 and removed
+                      as of kops 1.19
                     properties:
                       daemonServiceIP:
                         description: DaemonServiceIP is the Kubernetes Service IP

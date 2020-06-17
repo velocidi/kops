@@ -17,7 +17,6 @@ limitations under the License.
 package nodetasks
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -118,10 +117,6 @@ func (f *Package) GetName() *string {
 	return &f.Name
 }
 
-func (f *Package) SetName(name string) {
-	f.Name = name
-}
-
 // isOSPackage returns true if this is an OS provided package (as opposed to a bare .deb, for example)
 func (p *Package) isOSPackage() bool {
 	return fi.StringValue(p.Source) == ""
@@ -130,23 +125,6 @@ func (p *Package) isOSPackage() bool {
 // String returns a string representation, implementing the Stringer interface
 func (p *Package) String() string {
 	return fmt.Sprintf("Package: %s", p.Name)
-}
-
-func NewPackage(name string, contents string, meta string) (fi.Task, error) {
-	p := &Package{Name: name}
-	if contents != "" {
-		err := json.Unmarshal([]byte(contents), p)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing json for package %q: %v", name, err)
-		}
-	}
-
-	// Default values: we want to install a package so that it is healthy
-	if p.Healthy == nil {
-		p.Healthy = fi.Bool(true)
-	}
-
-	return p, nil
 }
 
 func (e *Package) Find(c *fi.Context) (*Package, error) {
@@ -297,6 +275,7 @@ func (_ *Package) RenderLocal(t *local.LocalTarget, a, e, changes *Package) erro
 
 	if a == nil || changes.Version != nil {
 		klog.Infof("Installing package %q (dependencies: %v)", e.Name, e.Deps)
+		var pkgs []string
 
 		if e.Source != nil {
 			// Install a deb or rpm.
@@ -316,10 +295,10 @@ func (_ *Package) RenderLocal(t *local.LocalTarget, a, e, changes *Package) erro
 			}
 
 			// Download all the debs/rpms.
-			localPkgs := make([]string, 1+len(e.Deps))
+			pkgs = make([]string, 1+len(e.Deps))
 			for i, pkg := range append([]*Package{e}, e.Deps...) {
 				local := path.Join(localPackageDir, pkg.Name+ext)
-				localPkgs[i] = local
+				pkgs[i] = local
 				var hash *hashing.Hash
 				if fi.StringValue(pkg.Hash) != "" {
 					parsed, err := hashing.FromString(fi.StringValue(pkg.Hash))
@@ -333,59 +312,32 @@ func (_ *Package) RenderLocal(t *local.LocalTarget, a, e, changes *Package) erro
 					return err
 				}
 			}
+		} else {
+			pkgs = append(pkgs, e.Name)
+		}
 
-			var args []string
-			env := os.Environ()
-			if t.HasTag(tags.TagOSFamilyDebian) {
-				// Only Debian releases newer than Jessie can install .deb via apt-get
-				// TODO: Refactor this function when Jessie support is dropped (duplicated code)
-				if t.HasTag(tags.TagOSDebianJessie) {
-					args = []string{"dpkg", "-i"}
-				} else {
-					args = []string{"apt-get", "install", "--yes", "--no-install-recommends"}
-					env = append(env, "DEBIAN_FRONTEND=noninteractive")
-				}
-			} else if t.HasTag(tags.TagOSFamilyRHEL) {
-				if t.HasTag(tags.TagOSCentOS8) || t.HasTag(tags.TagOSRHEL8) {
-					args = []string{"/usr/bin/dnf", "install", "-y", "--setopt=install_weak_deps=False"}
-				} else {
-					args = []string{"/usr/bin/yum", "install", "-y"}
-				}
+		var args []string
+		env := os.Environ()
+		if t.HasTag(tags.TagOSFamilyDebian) {
+			args = []string{"apt-get", "install", "--yes", "--no-install-recommends"}
+			env = append(env, "DEBIAN_FRONTEND=noninteractive")
+		} else if t.HasTag(tags.TagOSFamilyRHEL) {
+			if t.HasTag(tags.TagOSCentOS8) || t.HasTag(tags.TagOSRHEL8) {
+				args = []string{"/usr/bin/dnf", "install", "-y", "--setopt=install_weak_deps=False"}
 			} else {
-				return fmt.Errorf("unsupported package system")
-			}
-			args = append(args, localPkgs...)
-
-			klog.Infof("running command %s", args)
-			cmd := exec.Command(args[0], args[1:]...)
-			cmd.Env = env
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("error installing package %q: %v: %s", e.Name, err, string(output))
+				args = []string{"/usr/bin/yum", "install", "-y"}
 			}
 		} else {
-			var args []string
-			env := os.Environ()
-			if t.HasTag(tags.TagOSFamilyDebian) {
-				args = []string{"apt-get", "install", "--yes", "--no-install-recommends", e.Name}
-				env = append(env, "DEBIAN_FRONTEND=noninteractive")
-			} else if t.HasTag(tags.TagOSFamilyRHEL) {
-				if t.HasTag(tags.TagOSCentOS8) || t.HasTag(tags.TagOSRHEL8) {
-					args = []string{"/usr/bin/dnf", "install", "-y", "--setopt=install_weak_deps=False", e.Name}
-				} else {
-					args = []string{"/usr/bin/yum", "install", "-y", e.Name}
-				}
-			} else {
-				return fmt.Errorf("unsupported package system")
-			}
+			return fmt.Errorf("unsupported package system")
+		}
+		args = append(args, pkgs...)
 
-			klog.Infof("running command %s", args)
-			cmd := exec.Command(args[0], args[1:]...)
-			cmd.Env = env
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("error installing package %q: %v: %s", e.Name, err, string(output))
-			}
+		klog.Infof("running command %s", args)
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Env = env
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("error installing package %q: %v: %s", e.Name, err, string(output))
 		}
 	} else {
 		if changes.Healthy != nil {

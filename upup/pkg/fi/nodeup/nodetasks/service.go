@@ -17,7 +17,6 @@ limitations under the License.
 package nodetasks
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -40,8 +39,6 @@ const (
 	// But we use it in two ways: we update the docker manifest, and we install our own
 	// package (protokube, kubelet).  Maybe we should have the idea of a "system" package.
 	centosSystemdSystemPath = "/usr/lib/systemd/system"
-
-	coreosSystemdSystemPath = "/etc/systemd/system"
 
 	flatcarSystemdSystemPath = "/etc/systemd/system"
 
@@ -67,13 +64,13 @@ func (p *Service) GetDependencies(tasks map[string]fi.Task) []fi.Task {
 	var deps []fi.Task
 	for _, v := range tasks {
 		// We assume that services depend on everything except for
-		// LoadImageTask. If there are any LoadImageTasks (e.g. we're
+		// LoadImageTask or IssueCert. If there are any LoadImageTasks (e.g. we're
 		// launching a custom Kubernetes build), they all depend on
 		// the "docker.service" Service task.
 		switch v.(type) {
-		case *File, *Package, *UpdatePackages, *UserTask, *GroupTask, *MountDiskTask, *Chattr, *BindMount, *Archive:
+		case *File, *Package, *UpdatePackages, *UserTask, *GroupTask, *Chattr, *BindMount, *Archive:
 			deps = append(deps, v)
-		case *Service, *LoadImageTask:
+		case *Service, *LoadImageTask, *IssueCert:
 			// ignore
 		default:
 			klog.Warningf("Unhandled type %T in Service::GetDependencies: %v", v, v)
@@ -85,22 +82,6 @@ func (p *Service) GetDependencies(tasks map[string]fi.Task) []fi.Task {
 
 func (s *Service) String() string {
 	return fmt.Sprintf("Service: %s", s.Name)
-}
-
-func NewService(name string, contents string, meta string) (fi.Task, error) {
-	s := &Service{Name: name}
-	s.Definition = fi.String(contents)
-
-	if meta != "" {
-		err := json.Unmarshal([]byte(meta), s)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing json for service %q: %v", name, err)
-		}
-	}
-
-	s.InitDefaults()
-
-	return s, nil
 }
 
 func (s *Service) InitDefaults() *Service {
@@ -150,8 +131,6 @@ func (e *Service) systemdSystemPath(target tags.HasTags) (string, error) {
 		return debianSystemdSystemPath, nil
 	} else if target.HasTag(tags.TagOSFamilyRHEL) {
 		return centosSystemdSystemPath, nil
-	} else if target.HasTag("_coreos") {
-		return coreosSystemdSystemPath, nil
 	} else if target.HasTag("_flatcar") {
 		return flatcarSystemdSystemPath, nil
 	} else if target.HasTag("_containeros") {
@@ -401,8 +380,4 @@ var _ fi.HasName = &Service{}
 
 func (f *Service) GetName() *string {
 	return &f.Name
-}
-
-func (f *Service) SetName(name string) {
-	klog.Fatalf("SetName not supported for Service task")
 }

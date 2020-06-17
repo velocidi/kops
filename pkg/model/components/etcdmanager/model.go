@@ -17,18 +17,12 @@ limitations under the License.
 package etcdmanager
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/yaml"
-	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/assets"
@@ -103,8 +97,6 @@ func (b *EtcdManagerBuilder) Build(c *fi.ModelBuilderContext) error {
 			return err
 		}
 
-		format := string(fi.KeysetFormatV1Alpha2)
-
 		c.AddTask(&fitasks.ManagedFile{
 			Contents:  fi.WrapResource(fi.NewBytesResource(d)),
 			Lifecycle: b.Lifecycle,
@@ -118,7 +110,6 @@ func (b *EtcdManagerBuilder) Build(c *fi.ModelBuilderContext) error {
 			Name:    fi.String("etcd-manager-ca-" + etcdCluster.Name),
 			Subject: "cn=etcd-manager-ca-" + etcdCluster.Name,
 			Type:    "ca",
-			Format:  format,
 		})
 
 		// We create a CA for etcd peers and a separate one for clients
@@ -126,7 +117,6 @@ func (b *EtcdManagerBuilder) Build(c *fi.ModelBuilderContext) error {
 			Name:    fi.String("etcd-peers-ca-" + etcdCluster.Name),
 			Subject: "cn=etcd-peers-ca-" + etcdCluster.Name,
 			Type:    "ca",
-			Format:  format,
 		})
 
 		// Because API server can only have a single client-cert, we need to share a client CA
@@ -134,7 +124,6 @@ func (b *EtcdManagerBuilder) Build(c *fi.ModelBuilderContext) error {
 			Name:    fi.String("etcd-clients-ca"),
 			Subject: "cn=etcd-clients-ca",
 			Type:    "ca",
-			Format:  format,
 		}); err != nil {
 			return err
 		}
@@ -144,7 +133,6 @@ func (b *EtcdManagerBuilder) Build(c *fi.ModelBuilderContext) error {
 				Name:    fi.String("etcd-clients-ca-cilium"),
 				Subject: "cn=etcd-clients-ca-cilium",
 				Type:    "ca",
-				Format:  format,
 			})
 		}
 	}
@@ -161,35 +149,6 @@ func (b *EtcdManagerBuilder) buildManifest(etcdCluster *kops.EtcdClusterSpec) (*
 	return b.buildPod(etcdCluster)
 }
 
-// parseManifest parses a set of objects from a []byte
-func parseManifest(data []byte) ([]runtime.Object, error) {
-	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
-	deser := scheme.Codecs.UniversalDeserializer()
-
-	var objects []runtime.Object
-
-	for {
-		ext := runtime.RawExtension{}
-		if err := decoder.Decode(&ext); err != nil {
-			if err == io.EOF {
-				break
-			}
-			fmt.Fprintf(os.Stderr, "%s", string(data))
-			klog.Infof("manifest: %s", string(data))
-			return nil, fmt.Errorf("error parsing manifest: %v", err)
-		}
-
-		obj, _, err := deser.Decode([]byte(ext.Raw), nil, nil)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing object in manifest: %v", err)
-		}
-
-		objects = append(objects, obj)
-	}
-
-	return objects, nil
-}
-
 // Until we introduce the bundle, we hard-code the manifest
 var defaultManifest = `
 apiVersion: v1
@@ -199,7 +158,7 @@ metadata:
   namespace: kube-system
 spec:
   containers:
-  - image: kopeio/etcd-manager:3.0.20200429
+  - image: kopeio/etcd-manager:3.0.20200531
     name: etcd-manager
     resources:
       requests:
@@ -239,7 +198,7 @@ func (b *EtcdManagerBuilder) buildPod(etcdCluster *kops.EtcdClusterSpec) (*v1.Po
 	manifest = []byte(defaultManifest)
 
 	{
-		objects, err := parseManifest(manifest)
+		objects, err := model.ParseManifest(manifest)
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +220,6 @@ func (b *EtcdManagerBuilder) buildPod(etcdCluster *kops.EtcdClusterSpec) (*v1.Po
 			klog.Warningf("overloading image in manifest %s with images %s", bundle, etcdCluster.Manager.Image)
 			container.Image = etcdCluster.Manager.Image
 		}
-
 	}
 
 	// With etcd-manager the hosts changes are self-contained, so

@@ -25,6 +25,7 @@ import (
 	"k8s.io/kops/pkg/flagbuilder"
 	"k8s.io/kops/pkg/k8scodecs"
 	"k8s.io/kops/pkg/kubemanifest"
+	"k8s.io/kops/pkg/rbac"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
 	"k8s.io/kops/util/pkg/exec"
@@ -51,7 +52,7 @@ func (b *KubeControllerManagerBuilder) Build(c *fi.ModelBuilderContext) error {
 
 	// Include the CA Key
 	// @TODO: use a per-machine key?  use KMS?
-	if err := b.BuildPrivateKeyTask(c, fi.CertificateId_CA, "ca.key"); err != nil {
+	if err := b.BuildPrivateKeyTask(c, fi.CertificateIDCA, "ca.key"); err != nil {
 		return err
 	}
 
@@ -85,14 +86,10 @@ func (b *KubeControllerManagerBuilder) Build(c *fi.ModelBuilderContext) error {
 
 	// Add kubeconfig
 	{
-		// @TODO: Change kubeconfig to be https
-		kubeconfig, err := b.BuildPKIKubeconfig("kube-controller-manager")
-		if err != nil {
-			return err
-		}
+		kubeconfig := b.BuildIssuedKubeconfig("kube-controller-manager", nodetasks.PKIXName{CommonName: rbac.KubeControllerManager}, c)
 		c.AddTask(&nodetasks.File{
 			Path:     "/var/lib/kube-controller-manager/kubeconfig",
-			Contents: fi.NewStringResource(kubeconfig),
+			Contents: kubeconfig,
 			Type:     nodetasks.FileType_File,
 			Mode:     s("0400"),
 		})
@@ -151,10 +148,6 @@ func (b *KubeControllerManagerBuilder) buildPod() (*v1.Pod, error) {
 		case distros.DistributionContainerOS:
 			// Default is different on ContainerOS, see https://github.com/kubernetes/kubernetes/pull/58171
 			volumePluginDir = "/home/kubernetes/flexvolume/"
-
-		case distros.DistributionCoreOS:
-			// The /usr directory is read-only for CoreOS
-			volumePluginDir = "/var/lib/kubelet/volumeplugins/"
 
 		case distros.DistributionFlatcar:
 			// The /usr directory is read-only for Flatcar

@@ -17,7 +17,6 @@ limitations under the License.
 package assets
 
 import (
-	"bytes"
 	"fmt"
 	"net/url"
 	"os"
@@ -52,6 +51,20 @@ type AssetBuilder struct {
 
 	// KubernetesVersion is the version of kubernetes we are installing
 	KubernetesVersion semver.Version
+
+	// StaticManifests records static manifests
+	StaticManifests []*StaticManifest
+}
+
+type StaticManifest struct {
+	// Key is the unique identifier of the manifest
+	Key string
+
+	// Path is the path to the manifest
+	Path string
+
+	// The static manifest will only be applied to instances matching the specified role
+	Roles []kops.InstanceGroupRole
 }
 
 // ContainerAsset models a container's location.
@@ -99,32 +112,18 @@ func (a *AssetBuilder) RemapManifest(data []byte) ([]byte, error) {
 		return data, nil
 	}
 
-	manifests, err := kubemanifest.LoadManifestsFrom(data)
+	objects, err := kubemanifest.LoadObjectsFrom(data)
 	if err != nil {
 		return nil, err
 	}
 
-	var yamlSeparator = []byte("\n---\n\n")
-	var remappedManifests [][]byte
-	for _, manifest := range manifests {
-		if err := manifest.RemapImages(a.RemapImage); err != nil {
+	for _, object := range objects {
+		if err := object.RemapImages(a.RemapImage); err != nil {
 			return nil, fmt.Errorf("error remapping images: %v", err)
 		}
-
-		// Don't serialize empty objects - they confuse yaml parsers
-		if manifest.IsEmptyObject() {
-			continue
-		}
-
-		y, err := manifest.ToYAML()
-		if err != nil {
-			return nil, fmt.Errorf("error re-marshaling manifest: %v", err)
-		}
-
-		remappedManifests = append(remappedManifests, y)
 	}
 
-	return bytes.Join(remappedManifests, yamlSeparator), nil
+	return kubemanifest.ToYAML(objects)
 }
 
 // RemapImage normalizes a containers location if a user sets the AssetsLocation ContainerRegistry location.
@@ -132,15 +131,6 @@ func (a *AssetBuilder) RemapImage(image string) (string, error) {
 	asset := &ContainerAsset{}
 
 	asset.DockerImage = image
-
-	// The k8s.gcr.io prefix is an alias, but for CI builds we run from a docker load,
-	// and we only double-tag from 1.10 onwards.
-	// For versions prior to 1.10, remap k8s.gcr.io to the old name.
-	// This also means that we won't start using the aliased names on existing clusters,
-	// which could otherwise be surprising to users.
-	if !util.IsKubernetesGTE("1.10", a.KubernetesVersion) && strings.HasPrefix(image, "k8s.gcr.io/") {
-		image = "gcr.io/google_containers/" + strings.TrimPrefix(image, "k8s.gcr.io/")
-	}
 
 	if strings.HasPrefix(image, "kope/dns-controller:") {
 		// To use user-defined DNS Controller:
@@ -159,6 +149,13 @@ func (a *AssetBuilder) RemapImage(image string) (string, error) {
 		// 2. export KOPSCONTROLLER_IMAGE=[your docker hub repo]
 		// 3. make kops and create/apply cluster
 		override := os.Getenv("KOPSCONTROLLER_IMAGE")
+		if override != "" {
+			image = override
+		}
+	}
+
+	if strings.HasPrefix(image, "kope/kube-apiserver-healthcheck:") {
+		override := os.Getenv("KUBE_APISERVER_HEALTHCHECK_IMAGE")
 		if override != "" {
 			image = override
 		}
@@ -189,11 +186,7 @@ func (a *AssetBuilder) RemapImage(image string) (string, error) {
 		normalized := image
 
 		// Remove the 'standard' kubernetes image prefix, just for sanity
-		if !util.IsKubernetesGTE("1.10", a.KubernetesVersion) && strings.HasPrefix(normalized, "gcr.io/google_containers/") {
-			normalized = strings.TrimPrefix(normalized, "gcr.io/google_containers/")
-		} else {
-			normalized = strings.TrimPrefix(normalized, "k8s.gcr.io/")
-		}
+		normalized = strings.TrimPrefix(normalized, "k8s.gcr.io/")
 
 		// When assembling the cluster spec, kops may call the option more then once until the config converges
 		// This means that this function may me called more than once on the same image

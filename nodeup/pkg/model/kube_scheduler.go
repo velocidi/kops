@@ -24,6 +24,7 @@ import (
 	"k8s.io/kops/pkg/flagbuilder"
 	"k8s.io/kops/pkg/k8scodecs"
 	"k8s.io/kops/pkg/kubemanifest"
+	"k8s.io/kops/pkg/rbac"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
 	"k8s.io/kops/util/pkg/exec"
@@ -83,21 +84,20 @@ func (b *KubeSchedulerBuilder) Build(c *fi.ModelBuilderContext) error {
 	}
 
 	{
-		kubeconfig, err := b.BuildPKIKubeconfig("kube-scheduler")
-		if err != nil {
-			return err
-		}
+		kubeconfig := b.BuildIssuedKubeconfig("kube-scheduler", nodetasks.PKIXName{CommonName: rbac.KubeScheduler}, c)
 
 		c.AddTask(&nodetasks.File{
 			Path:     "/var/lib/kube-scheduler/kubeconfig",
-			Contents: fi.NewStringResource(kubeconfig),
+			Contents: kubeconfig,
 			Type:     nodetasks.FileType_File,
 			Mode:     s("0400"),
 		})
 	}
 	if useConfigFile {
 		var config *SchedulerConfig
-		if b.IsKubernetesGTE("1.18") {
+		if b.IsKubernetesGTE("1.19") {
+			config = NewSchedulerConfig("kubescheduler.config.k8s.io/v1beta1")
+		} else if b.IsKubernetesGTE("1.18") {
 			config = NewSchedulerConfig("kubescheduler.config.k8s.io/v1alpha2")
 		} else {
 			config = NewSchedulerConfig("kubescheduler.config.k8s.io/v1alpha1")

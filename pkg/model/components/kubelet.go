@@ -17,6 +17,7 @@ limitations under the License.
 package components
 
 import (
+	"fmt"
 	"strings"
 
 	"k8s.io/klog"
@@ -100,13 +101,17 @@ func (b *KubeletOptionsBuilder) BuildOptions(o interface{}) error {
 			evictionHard := []string{
 				// TODO: Some people recommend 250Mi, but this would hurt small machines
 				"memory.available<100Mi",
-
-				// Disk eviction (evict old images)
+			}
+			// Disk based evictions are not detecting the correct disk capacity in Kubernetes 1.19 and are
+			// blocking scheduling by tainting worker nodes with "node.kubernetes.io/disk-pressure:NoSchedule"
+			// TODO: Re-enable once the Kubelet issue is fixed
+			if b.Context.IsKubernetesLT("1.19") {
+				// Disk based eviction (evict old images)
 				// We don't need to specify both, but it seems harmless / safer
-				"nodefs.available<10%",
-				"nodefs.inodesFree<5%",
-				"imagefs.available<10%",
-				"imagefs.inodesFree<5%",
+				evictionHard = append(evictionHard, "nodefs.available<10%")
+				evictionHard = append(evictionHard, "nodefs.inodesFree<5%")
+				evictionHard = append(evictionHard, "imagefs.available<10%")
+				evictionHard = append(evictionHard, "imagefs.inodesFree<5%")
 			}
 			clusterSpec.Kubelet.EvictionHard = fi.String(strings.Join(evictionHard, ","))
 		}
@@ -153,11 +158,12 @@ func (b *KubeletOptionsBuilder) BuildOptions(o interface{}) error {
 		}
 		clusterSpec.CloudConfig.Multizone = fi.Bool(true)
 		clusterSpec.CloudConfig.NodeTags = fi.String(GCETagForRole(b.Context.ClusterName, kops.InstanceGroupRoleNode))
-	}
 
-	if cloudProvider == kops.CloudProviderVSphere {
-		clusterSpec.Kubelet.CloudProvider = "vsphere"
-		clusterSpec.Kubelet.HairpinMode = "promiscuous-bridge"
+		// Use the hostname from the GCE metadata service
+		// if hostnameOverride is not set.
+		if clusterSpec.Kubelet.HostnameOverride == "" {
+			clusterSpec.Kubelet.HostnameOverride = "@gce"
+		}
 	}
 
 	if cloudProvider == kops.CloudProviderOpenstack {
@@ -173,11 +179,12 @@ func (b *KubeletOptionsBuilder) BuildOptions(o interface{}) error {
 		clusterSpec.Kubelet.CloudProvider = "external"
 	}
 
-	usesKubenet, err := UsesKubenet(clusterSpec)
-	if err != nil {
-		return err
+	networking := clusterSpec.Networking
+	if networking == nil {
+		return fmt.Errorf("no networking mode set")
+
 	}
-	if usesKubenet {
+	if UsesKubenet(networking) {
 		clusterSpec.Kubelet.NetworkPluginName = "kubenet"
 
 		// AWS MTU is 9001
@@ -185,7 +192,7 @@ func (b *KubeletOptionsBuilder) BuildOptions(o interface{}) error {
 	}
 
 	// Specify our pause image
-	image := "k8s.gcr.io/pause-amd64:3.0"
+	image := "k8s.gcr.io/pause:3.2"
 	if image, err = b.Context.AssetBuilder.RemapImage(image); err != nil {
 		return err
 	}

@@ -46,7 +46,6 @@ import (
 	"k8s.io/kops/pkg/commands"
 	"k8s.io/kops/pkg/dns"
 	"k8s.io/kops/pkg/featureflag"
-	"k8s.io/kops/pkg/k8sversion"
 	"k8s.io/kops/pkg/model/components"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup"
@@ -138,16 +137,6 @@ type CreateClusterOptions struct {
 	// Allow custom public master name
 	MasterPublicName string
 
-	// vSphere options
-	VSphereServer        string
-	VSphereDatacenter    string
-	VSphereResourcePool  string
-	VSphereCoreDNSServer string
-	// Note: We need open-vm-tools to be installed for vSphere Cloud Provider to work
-	// We need VSphereDatastore to support Kubernetes vSphere Cloud Provider (v1.5.3)
-	// We can remove this once we support higher versions.
-	VSphereDatastore string
-
 	// Spotinst options
 	SpotinstProduct     string
 	SpotinstOrientation string
@@ -221,7 +210,7 @@ var (
 		--node-size $NODE_SIZE \
 		--master-size $MASTER_SIZE \
 		--master-zones $ZONES \
-		--networking weave \
+		--networking cilium \
 		--topology private \
 		--bastion="true" \
 		--yes
@@ -299,7 +288,7 @@ func NewCmdCreateCluster(f *util.Factory, out io.Writer) *cobra.Command {
 		cmd.Flags().StringVar(&options.ConfigBase, "config-base", options.ConfigBase, "A cluster-readable location where we mirror configuration information, separate from the state store.  Allows for a state store that is not accessible from the cluster.")
 	}
 
-	cmd.Flags().StringVar(&options.Cloud, "cloud", options.Cloud, "Cloud provider to use - gce, aws, vsphere, openstack")
+	cmd.Flags().StringVar(&options.Cloud, "cloud", options.Cloud, "Cloud provider to use - gce, aws, openstack")
 
 	cmd.Flags().StringSliceVar(&options.Zones, "zones", options.Zones, "Zones in which to run the cluster")
 	cmd.Flags().StringSliceVar(&options.MasterZones, "master-zones", options.MasterZones, "Zones in which to run masters (must be an odd number)")
@@ -330,7 +319,7 @@ func NewCmdCreateCluster(f *util.Factory, out io.Writer) *cobra.Command {
 
 	cmd.Flags().StringVar(&options.Image, "image", options.Image, "Image to use for all instances.")
 
-	cmd.Flags().StringVar(&options.Networking, "networking", options.Networking, "Networking mode to use.  kubenet (default), classic, external, kopeio-vxlan (or kopeio), weave, flannel-vxlan (or flannel), flannel-udp, calico, canal, kube-router, romana, amazon-vpc-routed-eni, cilium, cni.")
+	cmd.Flags().StringVar(&options.Networking, "networking", options.Networking, "Networking mode to use.  kubenet, external, weave, flannel-vxlan (or flannel), flannel-udp, calico, canal, kube-router, amazon-vpc-routed-eni, cilium, cni, lyftvpc.")
 
 	cmd.Flags().StringVar(&options.DNSZone, "dns-zone", options.DNSZone, "DNS hosted zone to use (defaults to longest matching zone)")
 	cmd.Flags().StringVar(&options.OutDir, "out", options.OutDir, "Path to write any local output")
@@ -381,15 +370,6 @@ func NewCmdCreateCluster(f *util.Factory, out io.Writer) *cobra.Command {
 	// GCE flags
 	cmd.Flags().StringVar(&options.Project, "project", options.Project, "Project to use (must be set on GCE)")
 	cmd.Flags().StringVar(&options.GCEServiceAccount, "gce-service-account", options.GCEServiceAccount, "Service account with which the GCE VM runs. Warning: if not set, VMs will run as default compute service account.")
-
-	if featureflag.VSphereCloudProvider.Enabled() {
-		// vSphere flags
-		cmd.Flags().StringVar(&options.VSphereServer, "vsphere-server", options.VSphereServer, "vsphere-server is required for vSphere. Set vCenter URL Ex: 10.192.10.30 or myvcenter.io (without https://)")
-		cmd.Flags().StringVar(&options.VSphereDatacenter, "vsphere-datacenter", options.VSphereDatacenter, "vsphere-datacenter is required for vSphere. Set the name of the datacenter in which to deploy Kubernetes VMs.")
-		cmd.Flags().StringVar(&options.VSphereResourcePool, "vsphere-resource-pool", options.VSphereDatacenter, "vsphere-resource-pool is required for vSphere. Set a valid Cluster, Host or Resource Pool in which to deploy Kubernetes VMs.")
-		cmd.Flags().StringVar(&options.VSphereCoreDNSServer, "vsphere-coredns-server", options.VSphereCoreDNSServer, "vsphere-coredns-server is required for vSphere.")
-		cmd.Flags().StringVar(&options.VSphereDatastore, "vsphere-datastore", options.VSphereDatastore, "vsphere-datastore is required for vSphere.  Set a valid datastore in which to store dynamic provision volumes.")
-	}
 
 	if featureflag.Spotinst.Enabled() {
 		// Spotinst flags
@@ -534,7 +514,7 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 				ExternalNetwork: fi.String(c.OpenstackExternalNet),
 			},
 			BlockStorage: &api.OpenstackBlockStorageConfig{
-				Version:  fi.String("v2"),
+				Version:  fi.String("v3"),
 				IgnoreAZ: fi.Bool(c.OpenstackStorageIgnoreAZ),
 			},
 			Monitor: &api.OpenstackMonitor{
@@ -933,41 +913,6 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 	}
 
 	if c.Cloud != "" {
-		if c.Cloud == "vsphere" {
-			if !featureflag.VSphereCloudProvider.Enabled() {
-				return fmt.Errorf("Feature flag VSphereCloudProvider is not set. Cloud vSphere will not be supported.")
-			}
-
-			if cluster.Spec.CloudConfig == nil {
-				cluster.Spec.CloudConfig = &api.CloudConfiguration{}
-			}
-
-			if c.VSphereServer == "" {
-				return fmt.Errorf("vsphere-server is required for vSphere. Set vCenter URL Ex: 10.192.10.30 or myvcenter.io (without https://)")
-			}
-			cluster.Spec.CloudConfig.VSphereServer = fi.String(c.VSphereServer)
-
-			if c.VSphereDatacenter == "" {
-				return fmt.Errorf("vsphere-datacenter is required for vSphere. Set the name of the datacenter in which to deploy Kubernetes VMs.")
-			}
-			cluster.Spec.CloudConfig.VSphereDatacenter = fi.String(c.VSphereDatacenter)
-
-			if c.VSphereResourcePool == "" {
-				return fmt.Errorf("vsphere-resource-pool is required for vSphere. Set a valid Cluster, Host or Resource Pool in which to deploy Kubernetes VMs.")
-			}
-			cluster.Spec.CloudConfig.VSphereResourcePool = fi.String(c.VSphereResourcePool)
-
-			if c.VSphereCoreDNSServer == "" {
-				return fmt.Errorf("A coredns server is required for vSphere.")
-			}
-			cluster.Spec.CloudConfig.VSphereCoreDNSServer = fi.String(c.VSphereCoreDNSServer)
-
-			if c.VSphereDatastore == "" {
-				return fmt.Errorf("vsphere-datastore is required for vSphere. Set a valid datastore in which to store dynamic provision volumes.")
-			}
-			cluster.Spec.CloudConfig.VSphereDatastore = fi.String(c.VSphereDatastore)
-		}
-
 		if featureflag.Spotinst.Enabled() {
 			if cluster.Spec.CloudConfig == nil {
 				cluster.Spec.CloudConfig = &api.CloudConfiguration{}
@@ -986,6 +931,9 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 		cluster.Spec.Project = c.Project
 	}
 	if api.CloudProviderID(cluster.Spec.CloudProvider) == api.CloudProviderGCE {
+		if cluster.Spec.CloudConfig == nil {
+			cluster.Spec.CloudConfig = &api.CloudConfiguration{}
+		}
 		if cluster.Spec.Project == "" {
 			project, err := gce.DefaultProject()
 			if err != nil {
@@ -997,16 +945,13 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 			}
 			cluster.Spec.Project = project
 		}
-	}
-
-	if c.GCEServiceAccount != "" {
-		klog.Infof("VMs will be configured to use specified Service Account: %v", c.GCEServiceAccount)
-		cluster.Spec.GCEServiceAccount = c.GCEServiceAccount
-	} else {
-		if api.CloudProviderID(cluster.Spec.CloudProvider) == api.CloudProviderGCE {
+		if c.GCEServiceAccount != "" {
+			klog.Infof("VMs will be configured to use specified Service Account: %v", c.GCEServiceAccount)
+			cluster.Spec.CloudConfig.GCEServiceAccount = c.GCEServiceAccount
+		} else {
 			klog.Warning("VMs will be configured to use the GCE default compute Service Account! This is an anti-pattern")
-			klog.Warning("Use a pre-create Service Account with the flag: --gce-service-account=account@projectname.iam.gserviceaccount.com")
-			cluster.Spec.GCEServiceAccount = "default"
+			klog.Warning("Use a pre-created Service Account with the flag: --gce-service-account=account@projectname.iam.gserviceaccount.com")
+			cluster.Spec.CloudConfig.GCEServiceAccount = "default"
 		}
 	}
 
@@ -1020,8 +965,6 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 
 	cluster.Spec.Networking = &api.NetworkingSpec{}
 	switch c.Networking {
-	case "classic":
-		cluster.Spec.Networking.Classic = &api.ClassicNetworkingSpec{}
 	case "kubenet":
 		cluster.Spec.Networking.Kubenet = &api.KubenetNetworkingSpec{}
 	case "external":
@@ -1064,8 +1007,11 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 		cluster.Spec.Networking.Canal = &api.CanalNetworkingSpec{}
 	case "kube-router":
 		cluster.Spec.Networking.Kuberouter = &api.KuberouterNetworkingSpec{}
-	case "romana":
-		cluster.Spec.Networking.Romana = &api.RomanaNetworkingSpec{}
+		if cluster.Spec.KubeProxy == nil {
+			cluster.Spec.KubeProxy = &api.KubeProxyConfig{}
+		}
+		enabled := false
+		cluster.Spec.KubeProxy.Enabled = &enabled
 	case "amazonvpc", "amazon-vpc-routed-eni":
 		cluster.Spec.Networking.AmazonVPC = &api.AmazonVPCNetworkingSpec{}
 	case "cilium":
@@ -1110,8 +1056,8 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 		}
 
 	case api.TopologyPrivate:
-		if !supportsPrivateTopology(cluster.Spec.Networking) {
-			return fmt.Errorf("Invalid networking option %s. Currently only '--networking kopeio-vxlan (or kopeio)', '--networking weave', '--networking flannel', '--networking calico', '--networking canal', '--networking kube-router', '--networking romana', '--networking amazon-vpc-routed-eni', '--networking cilium', '--networking lyftvpc', '--networking cni' are supported for private topologies", c.Networking)
+		if cluster.Spec.Networking.Kubenet != nil {
+			return fmt.Errorf("invalid networking option %s. Kubenet does not support private topology", c.Networking)
 		}
 		cluster.Spec.Topology = &api.TopologySpec{
 			Masters: api.TopologyPrivate,
@@ -1201,13 +1147,8 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 		cluster.Spec.MasterPublicName = c.MasterPublicName
 	}
 
-	kv, err := k8sversion.Parse(cluster.Spec.KubernetesVersion)
-	if err != nil {
-		return fmt.Errorf("failed to parse kubernetes version: %s", err.Error())
-	}
-
-	// check if we should set anonymousAuth to false on k8s versions >=1.11
-	if kv.IsGTE("1.11") {
+	// check if we should set anonymousAuth to false
+	{
 		if cluster.Spec.Kubelet == nil {
 			cluster.Spec.Kubelet = &api.KubeletConfigSpec{}
 		}
@@ -1295,7 +1236,7 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 	}
 
 	strict := false
-	err = validation.DeepValidate(cluster, instanceGroups, strict)
+	err = validation.DeepValidate(cluster, instanceGroups, strict, nil)
 	if err != nil {
 		return err
 	}
@@ -1319,7 +1260,7 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 		fullInstanceGroups = append(fullInstanceGroups, fullGroup)
 	}
 
-	err = validation.DeepValidate(fullCluster, fullInstanceGroups, true)
+	err = validation.DeepValidate(fullCluster, fullInstanceGroups, true, nil)
 	if err != nil {
 		return err
 	}
@@ -1451,14 +1392,6 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 	}
 
 	return nil
-}
-
-func supportsPrivateTopology(n *api.NetworkingSpec) bool {
-
-	if n.CNI != nil || n.Kopeio != nil || n.Weave != nil || n.Flannel != nil || n.Calico != nil || n.Canal != nil || n.Kuberouter != nil || n.Romana != nil || n.AmazonVPC != nil || n.Cilium != nil || n.LyftVPC != nil || n.GCE != nil {
-		return true
-	}
-	return false
 }
 
 func trimCommonPrefix(names []string) []string {

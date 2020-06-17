@@ -28,6 +28,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/pkg/pki"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
@@ -38,9 +39,9 @@ var (
 	Get additional information about cluster secrets.
 	`))
 
-	// TODO: what is an example??
 	describeSecretExample = templates.Examples(i18n.T(`
-
+	# Describe a secret
+	kops describe secrets admin
 	`))
 	describeSecretShort = i18n.T(`Describe a cluster secret`)
 )
@@ -118,7 +119,7 @@ func (c *DescribeSecretsCommand) Run(ctx context.Context, args []string) error {
 	for _, i := range items {
 		fmt.Fprintf(w, "Name:\t%s\n", i.Name)
 		fmt.Fprintf(w, "Type:\t%s\n", i.Type)
-		fmt.Fprintf(w, "Id:\t%s\n", i.Id)
+		fmt.Fprintf(w, "Id:\t%s\n", i.ID)
 
 		switch i.Type {
 		case kops.SecretTypeKeypair:
@@ -176,8 +177,8 @@ func describeKeypair(keyStore fi.CAStore, item *fi.KeystoreItem, w *bytes.Buffer
 	}
 
 	if cert != nil {
-		fmt.Fprintf(w, "Subject:\t%s\n", pkixNameToString(&cert.Certificate.Subject))
-		fmt.Fprintf(w, "Issuer:\t%s\n", pkixNameToString(&cert.Certificate.Issuer))
+		fmt.Fprintf(w, "Subject:\t%s\n", pki.PkixNameToString(&cert.Certificate.Subject))
+		fmt.Fprintf(w, "Issuer:\t%s\n", pki.PkixNameToString(&cert.Certificate.Issuer))
 		fmt.Fprintf(w, "AlternateNames:\t%s\n", strings.Join(alternateNames, ", "))
 		fmt.Fprintf(w, "CA:\t%v\n", cert.IsCA)
 		fmt.Fprintf(w, "NotAfter:\t%s\n", cert.Certificate.NotAfter)

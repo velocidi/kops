@@ -34,8 +34,11 @@ var (
 		Delete a secret.`))
 
 	deleteSecretExample = templates.Examples(i18n.T(`
+	# Syntax: kops delete secret <type> <name>
+	# or kops delete secret <type> <name> <id>
+	kops delete secret sshpublickey admin
 
-		`))
+	`))
 
 	deleteSecretShort = i18n.T(`Delete a secret`)
 )
@@ -124,7 +127,7 @@ func RunDeleteSecret(ctx context.Context, f *util.Factory, out io.Writer, option
 	if options.SecretID != "" {
 		var matches []*fi.KeystoreItem
 		for _, s := range secrets {
-			if s.Id == options.SecretID {
+			if s.ID == options.SecretID {
 				matches = append(matches, s)
 			}
 		}
@@ -154,7 +157,7 @@ func RunDeleteSecret(ctx context.Context, f *util.Factory, out io.Writer, option
 		keyset := &kops.Keyset{}
 		keyset.Name = secrets[0].Name
 		keyset.Spec.Type = secrets[0].Type
-		err = keyStore.DeleteKeysetItem(keyset, secrets[0].Id)
+		err = keyStore.DeleteKeysetItem(keyset, secrets[0].ID)
 	}
 	if err != nil {
 		return fmt.Errorf("error deleting secret: %v", err)

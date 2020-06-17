@@ -50,7 +50,7 @@ var (
 	// DNSPreCreate controls whether we pre-create DNS records.
 	DNSPreCreate = New("DNSPreCreate", Bool(true))
 	// EnableLaunchTemplates indicates we wish to switch to using launch templates rather than launchconfigurations
-	EnableLaunchTemplates = New("EnableLaunchTemplates", Bool(false))
+	EnableLaunchTemplates = New("EnableLaunchTemplates", Bool(true))
 	//EnableExternalCloudController toggles the use of cloud-controller-manager introduced in v1.7
 	EnableExternalCloudController = New("EnableExternalCloudController", Bool(false))
 	// EnableExternalDNS enables external DNS
@@ -76,10 +76,12 @@ var (
 	Spotinst = New("Spotinst", Bool(false))
 	// SpotinstOcean toggles the use of Spotinst Ocean instance group implementation.
 	SpotinstOcean = New("SpotinstOcean", Bool(false))
+	// SpotinstHybrid toggles between hybrid and full instance group implementations.
+	SpotinstHybrid = New("SpotinstHybrid", Bool(false))
+	// SpotinstController toggles the installation of the Spotinst controller addon.
+	SpotinstController = New("SpotinstController", Bool(true))
 	// VPCSkipEnableDNSSupport if set will make that a VPC does not need DNSSupport enabled.
 	VPCSkipEnableDNSSupport = New("VPCSkipEnableDNSSupport", Bool(false))
-	// VSphereCloudProvider enables the vsphere cloud provider
-	VSphereCloudProvider = New("VSphereCloudProvider", Bool(false))
 	// SkipEtcdVersionCheck will bypass the check that etcd-manager is using a supported etcd version
 	SkipEtcdVersionCheck = New("SkipEtcdVersionCheck", Bool(false))
 	// TerraformJSON outputs terraform in JSON instead of hcl output. JSON output can be also parsed by terraform 0.12

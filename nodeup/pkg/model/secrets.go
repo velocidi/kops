@@ -45,7 +45,7 @@ func (b *SecretBuilder) Build(c *fi.ModelBuilderContext) error {
 	}
 
 	// @step: retrieve the platform ca
-	if err := b.BuildCertificateTask(c, fi.CertificateId_CA, "ca.crt"); err != nil {
+	if err := b.BuildCertificateTask(c, fi.CertificateIDCA, "ca.crt"); err != nil {
 		return err
 	}
 
@@ -75,16 +75,6 @@ func (b *SecretBuilder) Build(c *fi.ModelBuilderContext) error {
 			return err
 		}
 		if err := b.BuildPrivateKeyTask(c, name, "server.key"); err != nil {
-			return err
-		}
-	}
-
-	{
-		// TODO: Remove - we use the apiserver-aggregator keypair instead (which is signed by a different CA)
-		if err := b.BuildCertificateTask(c, "apiserver-proxy-client", "proxy-client.cert"); err != nil {
-			return err
-		}
-		if err := b.BuildPrivateKeyTask(c, "apiserver-proxy-client", "proxy-client.key"); err != nil {
 			return err
 		}
 	}

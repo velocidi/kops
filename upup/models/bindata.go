@@ -29,7 +29,6 @@
 // upup/models/cloudup/resources/addons/networking.amazon-vpc-routed-eni/k8s-1.10.yaml.template
 // upup/models/cloudup/resources/addons/networking.amazon-vpc-routed-eni/k8s-1.12.yaml.template
 // upup/models/cloudup/resources/addons/networking.amazon-vpc-routed-eni/k8s-1.16.yaml.template
-// upup/models/cloudup/resources/addons/networking.amazon-vpc-routed-eni/k8s-1.8.yaml.template
 // upup/models/cloudup/resources/addons/networking.cilium.io/k8s-1.12.yaml.template
 // upup/models/cloudup/resources/addons/networking.cilium.io/k8s-1.7.yaml.template
 // upup/models/cloudup/resources/addons/networking.flannel/k8s-1.12.yaml.template
@@ -46,8 +45,6 @@
 // upup/models/cloudup/resources/addons/networking.projectcalico.org.canal/k8s-1.15.yaml.template
 // upup/models/cloudup/resources/addons/networking.projectcalico.org.canal/k8s-1.16.yaml.template
 // upup/models/cloudup/resources/addons/networking.projectcalico.org.canal/k8s-1.9.yaml.template
-// upup/models/cloudup/resources/addons/networking.romana/k8s-1.12.yaml.template
-// upup/models/cloudup/resources/addons/networking.romana/k8s-1.7.yaml.template
 // upup/models/cloudup/resources/addons/networking.weave/k8s-1.12.yaml.template
 // upup/models/cloudup/resources/addons/networking.weave/k8s-1.8.yaml.template
 // upup/models/cloudup/resources/addons/node-authorizer.addons.k8s.io/k8s-1.10.yaml.template
@@ -58,7 +55,6 @@
 // upup/models/cloudup/resources/addons/openstack.addons.k8s.io/k8s-1.13.yaml.template
 // upup/models/cloudup/resources/addons/podsecuritypolicy.addons.k8s.io/k8s-1.10.yaml.template
 // upup/models/cloudup/resources/addons/podsecuritypolicy.addons.k8s.io/k8s-1.12.yaml.template
-// upup/models/cloudup/resources/addons/podsecuritypolicy.addons.k8s.io/k8s-1.9.yaml.template
 // upup/models/cloudup/resources/addons/rbac.addons.k8s.io/k8s-1.8.yaml
 // upup/models/cloudup/resources/addons/scheduler.addons.k8s.io/v1.7.0.yaml
 // upup/models/cloudup/resources/addons/spotinst-kubernetes-cluster-controller.addons.k8s.io/v1.14.0.yaml.template
@@ -66,8 +62,6 @@
 // upup/models/cloudup/resources/addons/storage-aws.addons.k8s.io/v1.15.0.yaml
 // upup/models/cloudup/resources/addons/storage-aws.addons.k8s.io/v1.7.0.yaml
 // upup/models/cloudup/resources/addons/storage-gce.addons.k8s.io/v1.7.0.yaml
-// upup/models/nodeup/_automatic_upgrades/_debian_family/files/etc/apt/apt.conf.d/20auto-upgrades
-// upup/models/nodeup/_automatic_upgrades/_debian_family/packages/unattended-upgrades
 // upup/models/nodeup/resources/_lyft_vpc_cni/files/etc/cni/net.d/10-cni-ipvlan-vpc-k8s.conflist.template
 package models
 
@@ -1767,7 +1761,7 @@ spec:
           operator: Exists
           tolerationSeconds: 300
       containers:
-      - image: digitalocean/digitalocean-cloud-controller-manager:v0.1.20
+      - image: digitalocean/digitalocean-cloud-controller-manager:v0.1.24
         name: digitalocean-cloud-controller-manager
         command:
           - "/bin/digitalocean-cloud-controller-manager"
@@ -1864,6 +1858,17 @@ rules:
   - list
   - watch
   - update
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - watch
+  - list
+  - create
+  - update
+  - delete
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
@@ -1902,7 +1907,7 @@ metadata:
   labels:
     k8s-addon: dns-controller.addons.k8s.io
     k8s-app: dns-controller
-    version: v1.18.0-alpha.2
+    version: v1.18.0-alpha.3
 spec:
   replicas: 1
   selector:
@@ -1913,7 +1918,7 @@ spec:
       labels:
         k8s-addon: dns-controller.addons.k8s.io
         k8s-app: dns-controller
-        version: v1.18.0-alpha.2
+        version: v1.18.0-alpha.3
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
@@ -1927,7 +1932,7 @@ spec:
       serviceAccount: dns-controller
       containers:
       - name: dns-controller
-        image: kope/dns-controller:1.18.0-alpha.2
+        image: kope/dns-controller:1.18.0-alpha.3
         command:
 {{ range $arg := DnsControllerArgv }}
         - "{{ $arg }}"
@@ -2036,7 +2041,7 @@ metadata:
   labels:
     k8s-addon: dns-controller.addons.k8s.io
     k8s-app: dns-controller
-    version: v1.18.0-alpha.2
+    version: v1.18.0-alpha.3
 spec:
   replicas: 1
   selector:
@@ -2047,7 +2052,7 @@ spec:
       labels:
         k8s-addon: dns-controller.addons.k8s.io
         k8s-app: dns-controller
-        version: v1.18.0-alpha.2
+        version: v1.18.0-alpha.3
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
         # For 1.6, we keep the old tolerations in case of a downgrade to 1.5
@@ -2063,7 +2068,7 @@ spec:
       serviceAccount: dns-controller
       containers:
       - name: dns-controller
-        image: kope/dns-controller:1.18.0-alpha.2
+        image: kope/dns-controller:1.18.0-alpha.3
         command:
 {{ range $arg := DnsControllerArgv }}
         - "{{ $arg }}"
@@ -2441,7 +2446,7 @@ metadata:
   labels:
     k8s-addon: kops-controller.addons.k8s.io
     k8s-app: kops-controller
-    version: v1.18.0-alpha.2
+    version: v1.18.0-alpha.3
 spec:
   selector:
     matchLabels:
@@ -2455,7 +2460,7 @@ spec:
       labels:
         k8s-addon: kops-controller.addons.k8s.io
         k8s-app: kops-controller
-        version: v1.18.0-alpha.2
+        version: v1.18.0-alpha.3
     spec:
       priorityClassName: system-node-critical
       tolerations:
@@ -2468,7 +2473,7 @@ spec:
       serviceAccount: kops-controller
       containers:
       - name: kops-controller
-        image: kope/kops-controller:1.18.0-alpha.2
+        image: kope/kops-controller:1.18.0-alpha.3
         volumeMounts:
 {{ if .UseHostCertificates }}
         - mountPath: /etc/ssl/certs
@@ -3926,15 +3931,15 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions:
-              - key: "beta.kubernetes.io/os"
+              - key: "kubernetes.io/os"
                 operator: In
                 values:
                 - linux
-              - key: "beta.kubernetes.io/arch"
+              - key: "kubernetes.io/arch"
                 operator: In
                 values:
                 - amd64
-              - key: eks.amazonaws.com/compute-type
+              - key: "eks.amazonaws.com/compute-type"
                 operator: NotIn
                 values:
                 - fargate
@@ -3943,7 +3948,7 @@ spec:
       tolerations:
       - operator: Exists
       containers:
-      - image: "{{- or .Networking.AmazonVPC.ImageName "602401143452.dkr.ecr.us-west-2.amazonaws.com/amazon-k8s-cni:v1.6.1" }}"
+      - image: "{{- or .Networking.AmazonVPC.ImageName "602401143452.dkr.ecr.us-west-2.amazonaws.com/amazon-k8s-cni:v1.6.2" }}"
         imagePullPolicy: Always
         ports:
         - containerPort: 61678
@@ -4040,253 +4045,17 @@ func cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s116YamlTemplate() (*as
 	return a, nil
 }
 
-var _cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s18YamlTemplate = []byte(`# Vendored from https://github.com/aws/amazon-vpc-cni-k8s/blob/v1.3.3/config/v1.3/aws-k8s-cni.yaml
-
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: aws-node
-rules:
-- apiGroups:
-  - crd.k8s.amazonaws.com
-  resources:
-  - "*"
-  - namespaces
-  verbs:
-  - "*"
-- apiGroups: [""]
-  resources:
-  - pods
-  - nodes
-  - namespaces
-  verbs: ["list", "watch", "get"]
-- apiGroups: ["extensions"]
-  resources:
-  - daemonsets
-  verbs: ["list", "watch"]
----
+var _cloudupResourcesAddonsNetworkingCiliumIoK8s112YamlTemplate = []byte(`{{- if CiliumSecret }}
 apiVersion: v1
-kind: ServiceAccount
+kind: Secret
 metadata:
-  name: aws-node
+  name: cilium-ipsec-keys
   namespace: kube-system
+stringData:
+  {{ CiliumSecret }}
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: aws-node
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: aws-node
-subjects:
-- kind: ServiceAccount
-  name: aws-node
-  namespace: kube-system
----
-kind: DaemonSet
-apiVersion: extensions/v1beta1
-metadata:
-  name: aws-node
-  namespace: kube-system
-  labels:
-    k8s-app: aws-node
-spec:
-  updateStrategy:
-    type: RollingUpdate
-  selector:
-    matchLabels:
-      k8s-app: aws-node
-  template:
-    metadata:
-      labels:
-        k8s-app: aws-node
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
-    spec:
-      serviceAccountName: aws-node
-      hostNetwork: true
-      tolerations:
-      - operator: Exists
-      containers:
-      - image: "{{- or .Networking.AmazonVPC.ImageName "602401143452.dkr.ecr.us-west-2.amazonaws.com/amazon-k8s-cni:1.3.3" }}"
-        ports:
-        - containerPort: 61678
-          name: metrics
-        name: aws-node
-        env:
-          - name: CLUSTER_NAME
-            value: {{ ClusterName }}
-          - name: AWS_VPC_K8S_CNI_LOGLEVEL
-            value: DEBUG
-          - name: MY_NODE_NAME
-            valueFrom:
-              fieldRef:
-                fieldPath: spec.nodeName
-          - name: WATCH_NAMESPACE
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.namespace
-          {{- range .Networking.AmazonVPC.Env }}
-          - name: {{ .Name }}
-            value: "{{ .Value }}"
-          {{- end }}
-        resources:
-          requests:
-            cpu: 10m
-        securityContext:
-          privileged: true
-        volumeMounts:
-        - mountPath: /host/opt/cni/bin
-          name: cni-bin-dir
-        - mountPath: /host/etc/cni/net.d
-          name: cni-net-dir
-        - mountPath: /host/var/log
-          name: log-dir
-        - mountPath: /var/run/docker.sock
-          name: dockersock
-      volumes:
-      - name: cni-bin-dir
-        hostPath:
-          path: /opt/cni/bin
-      - name: cni-net-dir
-        hostPath:
-          path: /etc/cni/net.d
-      - name: log-dir
-        hostPath:
-          path: /var/log
-      - name: dockersock
-        hostPath:
-          path: /var/run/docker.sock
----
-apiVersion: apiextensions.k8s.io/v1beta1
-kind: CustomResourceDefinition
-metadata:
-  name: eniconfigs.crd.k8s.amazonaws.com
-spec:
-  scope: Cluster
-  group: crd.k8s.amazonaws.com
-  version: v1alpha1
-  names:
-    plural: eniconfigs
-    singular: eniconfig
-    kind: ENIConfig
-
----
-
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: k8s-ec2-srcdst
-  labels:
-    role.kubernetes.io/networking: "1"
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - nodes
-  verbs:
-  - get
-  - list
-  - watch
-  - update
-  - patch
-
----
-
+{{- end }}
 apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: k8s-ec2-srcdst
-  namespace: kube-system
-  labels:
-    role.kubernetes.io/networking: "1"
----
-
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: k8s-ec2-srcdst
-  labels:
-    role.kubernetes.io/networking: "1"
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: k8s-ec2-srcdst
-subjects:
-- kind: ServiceAccount
-  name: k8s-ec2-srcdst
-  namespace: kube-system
-
----
-
-apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  name: k8s-ec2-srcdst
-  namespace: kube-system
-  labels:
-    k8s-app: k8s-ec2-srcdst
-    role.kubernetes.io/networking: "1"
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      k8s-app: k8s-ec2-srcdst
-  template:
-    metadata:
-      labels:
-        k8s-app: k8s-ec2-srcdst
-        role.kubernetes.io/networking: "1"
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
-    spec:
-      hostNetwork: true
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      - key: CriticalAddonsOnly
-        operator: Exists
-      serviceAccountName: k8s-ec2-srcdst
-      containers:
-        - image: ottoyiu/k8s-ec2-srcdst:v0.2.0-3-gc0c26eca
-          name: k8s-ec2-srcdst
-          resources:
-            requests:
-              cpu: 10m
-              memory: 64Mi
-          env:
-            - name: AWS_REGION
-              value: {{ Region }}
-          volumeMounts:
-            - name: ssl-certs
-              mountPath: "/etc/ssl/certs/ca-certificates.crt"
-              readOnly: true
-          imagePullPolicy: "Always"
-      volumes:
-        - name: ssl-certs
-          hostPath:
-            path: "/etc/ssl/certs/ca-certificates.crt"
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-`)
-
-func cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s18YamlTemplateBytes() ([]byte, error) {
-	return _cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s18YamlTemplate, nil
-}
-
-func cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s18YamlTemplate() (*asset, error) {
-	bytes, err := cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s18YamlTemplateBytes()
-	if err != nil {
-		return nil, err
-	}
-
-	info := bindataFileInfo{name: "cloudup/resources/addons/networking.amazon-vpc-routed-eni/k8s-1.8.yaml.template", size: 0, mode: os.FileMode(0), modTime: time.Unix(0, 0)}
-	a := &asset{bytes: bytes, info: info}
-	return a, nil
-}
-
-var _cloudupResourcesAddonsNetworkingCiliumIoK8s112YamlTemplate = []byte(`apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cilium-config
@@ -4322,7 +4091,7 @@ data:
   #   setting it to "kvstore".
   identity-allocation-mode: crd
   # If you want to run cilium in debug mode change this value to true
-  debug: "{{- if .Debug -}}true{{- else -}}false{{- end -}}"
+  debug: "{{ .Debug }}"
   {{ if .EnablePrometheusMetrics }}
   # If you want metrics enabled in all of your Cilium agents, set the port for
   # which the Cilium agents will have their metrics exposed.
@@ -4330,18 +4099,22 @@ data:
   # "cilium-metrics-config" ConfigMap
   # NOTE that this will open the port on ALL nodes where Cilium pods are
   # scheduled.
-  prometheus-serve-addr: ":{{- or .AgentPrometheusPort "9090" }}"
+  prometheus-serve-addr: ":{{ .AgentPrometheusPort }}"
+  {{ end }}
+  {{ if .EnableEncryption }}
+  enable-ipsec: "true"
+  ipsec-key-file: /etc/ipsec/keys
   {{ end }}
   # Enable IPv4 addressing. If enabled, all endpoints are allocated an IPv4
   # address.
-  enable-ipv4: "{{- if or  (.EnableIpv4) (and (not (.EnableIpv4)) (not (.EnableIpv6))) -}}true{{- else -}}false{{- end -}}"
+  enable-ipv4: "true"
   # Enable IPv6 addressing. If enabled, all endpoints are allocated an IPv6
   # address.
-  enable-ipv6: "{{- if .EnableIpv6 -}}true{{- else -}}false{{- end -}}"
+  enable-ipv6: "false"
   # If you want cilium monitor to aggregate tracing for packets, set this level
   # to "low", "medium", or "maximum". The higher the level, the less packets
   # that will be seen in monitor output.
-  monitor-aggregation: "{{- if eq .MonitorAggregation "" -}}medium{{- else -}}{{ .MonitorAggregation }}{{- end -}}"
+  monitor-aggregation: "{{ .MonitorAggregation }}"
   # ct-global-max-entries-* specifies the maximum number of connections
   # supported across all endpoints, split by protocol: tcp or other. One pair
   # of maps uses these values for IPv4 connections, and another pair of maps
@@ -4353,8 +4126,8 @@ data:
   #
   # For users upgrading from Cilium 1.2 or earlier, to minimize disruption
   # during the upgrade process, comment out these options.
-  bpf-ct-global-tcp-max: "{{- if eq .BPFCTGlobalTCPMax 0 -}}524288{{- else -}}{{ .BPFCTGlobalTCPMax}}{{- end -}}"
-  bpf-ct-global-any-max: "{{- if eq .BPFCTGlobalAnyMax 0 -}}262144{{- else -}}{{ .BPFCTGlobalAnyMax}}{{- end -}}"
+  bpf-ct-global-tcp-max: "{{ .BPFCTGlobalTCPMax }}"
+  bpf-ct-global-any-max: "{{ .BPFCTGlobalAnyMax }}"
 
   # Pre-allocation of map entries allows per-packet latency to be reduced, at
   # the expense of up-front memory allocation for the entries in the maps. The
@@ -4375,20 +4148,20 @@ data:
   preallocate-bpf-maps: "{{- if .PreallocateBPFMaps -}}true{{- else -}}false{{- end -}}"
   # Regular expression matching compatible Istio sidecar istio-proxy
   # container image names
-  sidecar-istio-proxy-image: "{{- if eq .SidecarIstioProxyImage "" -}}cilium/istio_proxy{{- else -}}{{ .SidecarIstioProxyImage }}{{- end -}}"
+  sidecar-istio-proxy-image: "{{ .SidecarIstioProxyImage }}"
   # Encapsulation mode for communication between nodes
   # Possible values:
   #   - disabled
   #   - vxlan (default)
   #   - geneve
-  tunnel: "{{- if eq .Tunnel "" -}}vxlan{{- else -}}{{ .Tunnel }}{{- end -}}"
+  tunnel: "{{ .Tunnel }}"
 
   # Name of the cluster. Only relevant when building a mesh of clusters.
-  cluster-name: "{{- if eq .ClusterName "" -}}default{{- else -}}{{ .ClusterName}}{{- end -}}"
+  cluster-name: "{{ .ClusterName }}"
 
   # DNS response code for rejecting DNS requests,
   # available options are "nameError" and "refused"
-  tofqdns-dns-reject-response-code: "{{- if eq .ToFqdnsDNSRejectResponseCode  "" -}}refused{{- else -}}{{ .ToFqdnsDNSRejectResponseCode }}{{- end -}}"
+  tofqdns-dns-reject-response-code: "{{ .ToFqdnsDNSRejectResponseCode }}"
   # This option is disabled by default starting from version 1.4.x in favor
   # of a more powerful DNS proxy-based implementation, see [0] for details.
   # Enable this option if you want to use FQDN policies but do not want to use
@@ -4422,11 +4195,11 @@ data:
   # - none
   # - auto (automatically detect the container runtime)
   #
-  container-runtime: "{{- if eq .ContainerRuntimeLabels "" -}}none{{- else -}}{{ .ContainerRuntimeLabels }}{{- end -}}"
+  container-runtime: "{{ .ContainerRuntimeLabels }}"
   masquerade: "{{- if .DisableMasquerade -}}false{{- else -}}true{{- end -}}"
   install-iptables-rules: "{{- if .IPTablesRulesNoinstall -}}false{{- else -}}true{{- end -}}"
-  auto-direct-node-routes: "{{- if .AutoDirectNodeRoutes -}}true{{- else -}}false{{- end -}}"
-  enable-node-port: "{{- if .EnableNodePort -}}true{{- else -}}false{{- end -}}"
+  auto-direct-node-routes: "{{ .AutoDirectNodeRoutes }}"
+  enable-node-port: "{{ .EnableNodePort }}"
   kube-proxy-replacement: "{{- if .EnableNodePort -}}strict{{- else -}}partial{{- end -}}"
   enable-remote-node-identity: "{{- if .EnableRemoteNodeIdentity -}}true{{- else -}}false{{- end -}}"
   {{ with .Ipam }}
@@ -4707,7 +4480,7 @@ spec:
           value: {{ . }}
         {{ end }}
 {{ with .Networking.Cilium }}
-        image: "docker.io/cilium/cilium:{{- or .Version "v1.7.3" }}"
+        image: "docker.io/cilium/cilium:{{ .Version  }}"
         imagePullPolicy: IfNotPresent
         lifecycle:
           postStart:
@@ -4735,8 +4508,8 @@ spec:
         name: cilium-agent
         {{ if .EnablePrometheusMetrics }}
         ports:
-        - containerPort: {{ or .AgentPrometheusPort "9090" }}
-          hostPort: {{ or .AgentPrometheusPort "9090" }}
+        - containerPort: {{ .AgentPrometheusPort }}
+          hostPort: {{ .AgentPrometheusPort }}
           name: prometheus
           protocol: TCP
         {{ end }}
@@ -4787,6 +4560,10 @@ spec:
           readOnly: true
         - mountPath: /run/xtables.lock
           name: xtables-lock
+{{ if CiliumSecret }}
+        - mountPath: /etc/ipsec
+          name: cilium-ipsec-secrets
+{{ end }}
       hostNetwork: true
       initContainers:
       - command:
@@ -4810,7 +4587,7 @@ spec:
               key: wait-bpf-mount
               name: cilium-config
               optional: true
-        image: "docker.io/cilium/cilium:{{- or .Version "v1.7.3" }}"
+        image: "docker.io/cilium/cilium:{{ "v1.7.3" }}"
 ## end of ` + "`" + `with .Networking.Cilium` + "`" + `
 #{{ end }}
         imagePullPolicy: IfNotPresent
@@ -4887,6 +4664,11 @@ spec:
       - configMap:
           name: cilium-config
         name: cilium-config-path
+{{ if CiliumSecret }}
+      - name: cilium-ipsec-secrets
+        secret:
+          secretName: cilium-ipsec-keys
+{{ end }}
   updateStrategy:
     rollingUpdate:
       maxUnavailable: 2
@@ -5011,7 +4793,7 @@ spec:
         - name: KUBERNETES_SERVICE_PORT
           value: "443"
 {{ with .Networking.Cilium }}
-        image: "docker.io/cilium/operator:{{- if eq .Version "" -}}v1.7.3{{- else -}}{{ .Version }}{{- end -}}"
+        image: "docker.io/cilium/operator:{{ .Version }}"
         imagePullPolicy: IfNotPresent
         name: cilium-operator
         {{ if .EnablePrometheusMetrics }}
@@ -5127,10 +4909,10 @@ data:
   {{ end }}
   # Enable IPv4 addressing. If enabled, all endpoints are allocated an IPv4
   # address.
-  enable-ipv4: "{{- if or  (.EnableIpv4) (and (not (.EnableIpv4)) (not (.EnableIpv6))) -}}true{{- else -}}false{{- end -}}"
+  enable-ipv4: "true"
   # Enable IPv6 addressing. If enabled, all endpoints are allocated an IPv6
   # address.
-  enable-ipv6: "{{- if .EnableIpv6 -}}true{{- else -}}false{{- end -}}"
+  enable-ipv6: "false"
   # If you want cilium monitor to aggregate tracing for packets, set this level
   # to "low", "medium", or "maximum". The higher the level, the less packets
   # that will be seen in monitor output.
@@ -5146,8 +4928,8 @@ data:
   #
   # For users upgrading from Cilium 1.2 or earlier, to minimize disruption
   # during the upgrade process, comment out these options.
-  bpf-ct-global-tcp-max: "{{- if eq .BPFCTGlobalTCPMax 0 -}}524288{{- else -}}{{ .BPFCTGlobalTCPMax}}{{- end -}}"
-  bpf-ct-global-any-max: "{{- if eq .BPFCTGlobalAnyMax 0 -}}262144{{- else -}}{{ .BPFCTGlobalAnyMax}}{{- end -}}"
+  bpf-ct-global-tcp-max: "{{ .BPFCTGlobalTCPMax }}"
+  bpf-ct-global-any-max: "{{ .BPFCTGlobalAnyMax }}"
 
   # Pre-allocation of map entries allows per-packet latency to be reduced, at
   # the expense of up-front memory allocation for the entries in the maps. The
@@ -5165,19 +4947,19 @@ data:
   #
   # If this option is set to "false" during an upgrade from 1.3 or earlier to
   # 1.4 or later, then it may cause one-time disruptions during the upgrade.
-  preallocate-bpf-maps: "{{- if .PreallocateBPFMaps -}}true{{- else -}}false{{- end -}}"
+  preallocate-bpf-maps: "{{ .PreallocateBPFMaps }}"
   # Regular expression matching compatible Istio sidecar istio-proxy
   # container image names
-  sidecar-istio-proxy-image: "{{- if eq .SidecarIstioProxyImage "" -}}cilium/istio_proxy{{- else -}}{{ .SidecarIstioProxyImage }}{{- end -}}"
+  sidecar-istio-proxy-image: "{{ .SidecarIstioProxyImage }}"
   # Encapsulation mode for communication between nodes
   # Possible values:
   #   - disabled
   #   - vxlan (default)
   #   - geneve
-  tunnel: "{{- if eq .Tunnel "" -}}vxlan{{- else -}}{{ .Tunnel }}{{- end -}}"
+  tunnel: "{{ .Tunnel }}"
 
   # Name of the cluster. Only relevant when building a mesh of clusters.
-  cluster-name: "{{- if eq .ClusterName "" -}}default{{- else -}}{{ .ClusterName}}{{- end -}}"
+  cluster-name: "{{ .ClusterName }}"
 
   # This option is disabled by default starting from version 1.4.x in favor
   # of a more powerful DNS proxy-based implementation, see [0] for details.
@@ -5190,7 +4972,7 @@ data:
   #
   # [0] http://docs.cilium.io/en/stable/policy/language/#dns-based
   # [1] http://docs.cilium.io/en/stable/install/upgrade/#changes-that-may-require-action
-  tofqdns-enable-poller: "{{- if .ToFqdnsEnablePoller -}}true{{- else -}}false{{- end -}}"
+  tofqdns-enable-poller: "{{ .ToFqdnsEnablePoller }}"
   # wait-bpf-mount makes init container wait until bpf filesystem is mounted
   wait-bpf-mount: "false"
   # Enable fetching of container-runtime specific metadata
@@ -5212,11 +4994,11 @@ data:
   # - none
   # - auto (automatically detect the container runtime)
   #
-  container-runtime: "{{- if eq .ContainerRuntimeLabels "" -}}none{{- else -}}{{ .ContainerRuntimeLabels }}{{- end -}}"
+  container-runtime: "{{ .ContainerRuntimeLabels }}"
   masquerade: "{{- if .DisableMasquerade -}}false{{- else -}}true{{- end -}}"
   install-iptables-rules: "{{- if .IPTablesRulesNoinstall -}}false{{- else -}}true{{- end -}}"
   auto-direct-node-routes: "{{- if .AutoDirectNodeRoutes -}}true{{- else -}}false{{- end -}}"
-  enable-node-port: "{{- if .EnableNodePort -}}true{{- else -}}false{{- end -}}"
+  enable-node-port: "{{ .EnableNodePort }}"
   {{ with .Ipam }}
   ipam: {{ . }}
   {{ if eq . "eni" }}
@@ -5476,7 +5258,7 @@ spec:
           value: {{ . }}
         {{ end }}
 {{ with .Networking.Cilium }}
-        image: "docker.io/cilium/cilium:{{- or .Version "v1.6.6" }}"
+        image: "docker.io/cilium/cilium:{{ .Version  }}"
         imagePullPolicy: IfNotPresent
         lifecycle:
           postStart:
@@ -5504,8 +5286,8 @@ spec:
         name: cilium-agent
         {{ if .EnablePrometheusMetrics }}
         ports:
-        - containerPort: {{ or .AgentPrometheusPort "9090" }}
-          hostPort: {{ or .AgentPrometheusPort "9090" }}
+        - containerPort: {{ .AgentPrometheusPort }}
+          hostPort: {{ .AgentPrometheusPort }}
           name: prometheus
           protocol: TCP
         {{ end }}
@@ -5748,7 +5530,7 @@ spec:
         - name: KUBERNETES_SERVICE_PORT
           value: "443"
 {{ with .Networking.Cilium }}
-        image: "docker.io/cilium/operator:{{- or .Version "v1.6.6" }}"
+        image: "docker.io/cilium/operator:{{ .Version }}"
         imagePullPolicy: IfNotPresent
         name: cilium-operator
         {{ if .EnablePrometheusMetrics }}
@@ -7378,7 +7160,7 @@ spec:
       serviceAccountName: calico-node
       priorityClassName: system-cluster-critical
       containers:
-      - image: calico/typha:v3.9.5
+      - image: calico/typha:v3.9.6
         name: calico-typha
         ports:
         - containerPort: 5473
@@ -7494,7 +7276,7 @@ spec:
         # It can be deleted if this is a fresh installation, or if you have already
         # upgraded to use calico-ipam.
         - name: upgrade-ipam
-          image: calico/cni:v3.9.5
+          image: calico/cni:v3.9.6
           command: ["/opt/cni/bin/calico-ipam", "-upgrade"]
           env:
             - name: KUBERNETES_NODE_NAME
@@ -7514,7 +7296,7 @@ spec:
         # This container installs the CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: calico/cni:v3.9.5
+          image: calico/cni:v3.9.6
           command: ["/install-cni.sh"]
           env:
             # Name of the CNI config file to create.
@@ -7548,7 +7330,7 @@ spec:
         # Adds a Flex Volume Driver that creates a per-pod Unix Domain Socket to allow Dikastes
         # to communicate with Felix over the Policy Sync API.
         - name: flexvol-driver
-          image: calico/pod2daemon-flexvol:v3.9.5
+          image: calico/pod2daemon-flexvol:v3.9.6
           volumeMounts:
           - name: flexvol-driver-host
             mountPath: /host/driver
@@ -7557,7 +7339,7 @@ spec:
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: calico/node:v3.9.5
+          image: calico/node:v3.9.6
           env:
             # Use Kubernetes API as the backing datastore.
             - name: DATASTORE_TYPE
@@ -7589,6 +7371,10 @@ spec:
             # Auto-detect the BGP IP address.
             - name: IP
               value: "autodetect"
+            - name: IP_AUTODETECTION_METHOD
+              value: "{{- or .Networking.Calico.IPv4AutoDetectionMethod "first-found" }}"
+            - name: IP6_AUTODETECTION_METHOD
+              value: "{{- or .Networking.Calico.IPv6AutoDetectionMethod "first-found" }}"
             # Enable IPIP
             - name: CALICO_IPV4POOL_IPIP
               value: "{{- if and (eq .CloudProvider "aws") (.Networking.Calico.CrossSubnet) -}}CrossSubnet{{- else -}} {{- or .Networking.Calico.IPIPMode "Always" -}} {{- end -}}"
@@ -7760,7 +7546,7 @@ spec:
       priorityClassName: system-cluster-critical
       containers:
         - name: calico-kube-controllers
-          image: calico/kube-controllers:v3.9.5
+          image: calico/kube-controllers:v3.9.6
           env:
             # Choose which controllers to run.
             - name: ENABLED_CONTROLLERS
@@ -8490,7 +8276,7 @@ spec:
       securityContext:
         fsGroup: 65534
       containers:
-      - image: calico/typha:v3.13.3
+      - image: calico/typha:v3.13.4
         name: calico-typha
         ports:
         - containerPort: 5473
@@ -8602,7 +8388,7 @@ spec:
         # It can be deleted if this is a fresh installation, or if you have already
         # upgraded to use calico-ipam.
         - name: upgrade-ipam
-          image: calico/cni:v3.13.3
+          image: calico/cni:v3.13.4
           command: ["/opt/cni/bin/calico-ipam", "-upgrade"]
           env:
             - name: KUBERNETES_NODE_NAME
@@ -8624,7 +8410,7 @@ spec:
         # This container installs the CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: calico/cni:v3.13.3
+          image: calico/cni:v3.13.4
           command: ["/install-cni.sh"]
           env:
             # Name of the CNI config file to create.
@@ -8660,7 +8446,7 @@ spec:
         # Adds a Flex Volume Driver that creates a per-pod Unix Domain Socket to allow Dikastes
         # to communicate with Felix over the Policy Sync API.
         - name: flexvol-driver
-          image: calico/pod2daemon-flexvol:v3.13.3
+          image: calico/pod2daemon-flexvol:v3.13.4
           volumeMounts:
           - name: flexvol-driver-host
             mountPath: /host/driver
@@ -8671,7 +8457,7 @@ spec:
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: calico/node:v3.13.3
+          image: calico/node:v3.13.4
           env:
             # Use Kubernetes API as the backing datastore.
             - name: DATASTORE_TYPE
@@ -8704,6 +8490,10 @@ spec:
             # Auto-detect the BGP IP address.
             - name: IP
               value: "autodetect"
+            - name: IP_AUTODETECTION_METHOD
+              value: "{{- or .Networking.Calico.IPv4AutoDetectionMethod "first-found" }}"
+            - name: IP6_AUTODETECTION_METHOD
+              value: "{{- or .Networking.Calico.IPv6AutoDetectionMethod "first-found" }}"
             # Enable IPIP
             - name: CALICO_IPV4POOL_IPIP
               value: "{{- if and (eq .CloudProvider "aws") (.Networking.Calico.CrossSubnet) -}}CrossSubnet{{- else -}} {{- or .Networking.Calico.IPIPMode "Always" -}} {{- end -}}"
@@ -8875,7 +8665,7 @@ spec:
       priorityClassName: system-cluster-critical
       containers:
         - name: calico-kube-controllers
-          image: calico/kube-controllers:v3.13.3
+          image: calico/kube-controllers:v3.13.4
           env:
             # Choose which controllers to run.
             - name: ENABLED_CONTROLLERS
@@ -11530,7 +11320,7 @@ spec:
       securityContext:
         fsGroup: 65534
       containers:
-      - image: calico/typha:v3.12.1
+      - image: calico/typha:v3.12.2
         name: calico-typha
         ports:
         - containerPort: 5473
@@ -11647,7 +11437,7 @@ spec:
         # This container installs the CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: calico/cni:v3.12.1
+          image: calico/cni:v3.12.2
           command: ["/install-cni.sh"]
           env:
             # Name of the CNI config file to create.
@@ -11683,7 +11473,7 @@ spec:
         # Adds a Flex Volume Driver that creates a per-pod Unix Domain Socket to allow Dikastes
         # to communicate with Felix over the Policy Sync API.
         - name: flexvol-driver
-          image: calico/pod2daemon-flexvol:v3.12.1
+          image: calico/pod2daemon-flexvol:v3.12.2
           volumeMounts:
           - name: flexvol-driver-host
             mountPath: /host/driver
@@ -11694,7 +11484,7 @@ spec:
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: calico/node:v3.12.1
+          image: calico/node:v3.12.2
           env:
             # Use Kubernetes API as the backing datastore.
             - name: DATASTORE_TYPE
@@ -12454,7 +12244,7 @@ spec:
       securityContext:
         fsGroup: 65534
       containers:
-      - image: calico/typha:v3.13.3
+      - image: calico/typha:v3.13.4
         name: calico-typha
         ports:
         - containerPort: 5473
@@ -12565,7 +12355,7 @@ spec:
         # This container installs the CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: calico/cni:v3.13.3
+          image: calico/cni:v3.13.4
           command: ["/install-cni.sh"]
           env:
             # Name of the CNI config file to create.
@@ -12601,7 +12391,7 @@ spec:
         # Adds a Flex Volume Driver that creates a per-pod Unix Domain Socket to allow Dikastes
         # to communicate with Felix over the Policy Sync API.
         - name: flexvol-driver
-          image: calico/pod2daemon-flexvol:v3.13.3
+          image: calico/pod2daemon-flexvol:v3.13.4
           volumeMounts:
           - name: flexvol-driver-host
             mountPath: /host/driver
@@ -12612,7 +12402,7 @@ spec:
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: calico/node:v3.13.3
+          image: calico/node:v3.13.4
           env:
             # Use Kubernetes API as the backing datastore.
             - name: DATASTORE_TYPE
@@ -13380,768 +13170,6 @@ func cloudupResourcesAddonsNetworkingProjectcalicoOrgCanalK8s19YamlTemplate() (*
 	return a, nil
 }
 
-var _cloudupResourcesAddonsNetworkingRomanaK8s112YamlTemplate = []byte(`---
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: romana-listener
-rules:
-- apiGroups:
-  - "*"
-  resources:
-  - pods
-  - namespaces
-  - nodes
-  - endpoints
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - extensions
-  resources:
-  - networkpolicies
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - "*"
-  resources:
-  - services
-  verbs:
-  - update
-  - list
-  - watch
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: romana-listener
-  namespace: kube-system
----
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: romana-listener
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: romana-listener
-subjects:
-- kind: ServiceAccount
-  name: romana-listener
-  namespace: kube-system
----
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: romana-agent
-rules:
-- apiGroups:
-  - "*"
-  resources:
-  - pods
-  - nodes
-  verbs:
-  - get
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: romana-agent
-  namespace: kube-system
----
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: romana-agent
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: romana-agent
-subjects:
-- kind: ServiceAccount
-  name: romana-agent
-  namespace: kube-system
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: romana-etcd
-  namespace: kube-system
-spec:
-  clusterIP: {{ .Networking.Romana.EtcdServiceIP }}
-  ports:
-  - name: etcd
-    port: 12379
-    protocol: TCP
-    targetPort: 4001
-  selector:
-    k8s-app: etcd-server
-  sessionAffinity: None
-  type: ClusterIP
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: romana
-  namespace: kube-system
-spec:
-  clusterIP: {{ .Networking.Romana.DaemonServiceIP }}
-  ports:
-  - name: daemon
-    port: 9600
-    protocol: TCP
-    targetPort: 9600
-  selector:
-    romana-app: daemon
-  sessionAffinity: None
-  type: ClusterIP
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: romana-daemon
-  namespace: kube-system
-  labels:
-    romana-app: daemon
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      romana-app: daemon
-  template:
-    metadata:
-      labels:
-        romana-app: daemon
-    spec:
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-      hostNetwork: true
-      priorityClassName: system-cluster-critical
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      containers:
-      - name: romana-daemon
-        image: quay.io/romana/daemon:v2.0.2
-        imagePullPolicy: Always
-        resources:
-          requests:
-            cpu: 10m
-            memory: 64Mi
-          limits:
-            memory: 64Mi
-        args:
-        - --cloud=aws
-        - --network-cidr-overrides=romana-network={{ .KubeControllerManager.ClusterCIDR }}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: romana-listener
-  namespace: kube-system
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      romana-app: listener
-  template:
-    metadata:
-      labels:
-        romana-app: listener
-    spec:
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-      hostNetwork: true
-      priorityClassName: system-cluster-critical
-      serviceAccountName: romana-listener
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      containers:
-      - name: romana-listener
-        image: quay.io/romana/listener:v2.0.2
-        imagePullPolicy: Always
-        resources:
-          requests:
-            cpu: 10m
-            memory: 64Mi
-          limits:
-            memory: 64Mi
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: romana-agent
-  namespace: kube-system
-  labels:
-    romana-app: agent
-spec:
-  updateStrategy:
-    type: RollingUpdate
-  selector:
-    matchLabels:
-      romana-app: agent
-  template:
-    metadata:
-      labels:
-        romana-app: agent
-    spec:
-      hostNetwork: true
-      priorityClassName: system-node-critical
-      securityContext:
-        seLinuxOptions:
-          type: spc_t
-      serviceAccountName: romana-agent
-      tolerations:
-      - effect: NoSchedule
-        operator: Exists
-      - effect: NoExecute
-        operator: Exists
-      containers:
-      - name: romana-agent
-        image: quay.io/romana/agent:v2.0.2
-        imagePullPolicy: Always
-        resources:
-          requests:
-            cpu: 25m
-            memory: 128Mi
-          limits:
-            memory: 128Mi
-        env:
-        - name: NODENAME
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
-        - name: NODEIP
-          valueFrom:
-            fieldRef:
-              fieldPath: status.hostIP
-        args:
-        - --service-cluster-ip-range={{ .ServiceClusterIPRange }}
-        securityContext:
-          privileged: true
-        volumeMounts:
-        - name: host-usr-local-bin
-          mountPath: /host/usr/local/bin
-        - name: host-etc-romana
-          mountPath: /host/etc/romana
-        - name: host-cni-bin
-          mountPath: /host/opt/cni/bin
-        - name: host-cni-net-d
-          mountPath: /host/etc/cni/net.d
-        - name: run-path
-          mountPath: /var/run/romana
-      volumes:
-      - name: host-usr-local-bin
-        hostPath:
-          path: /usr/local/bin
-      - name: host-etc-romana
-        hostPath:
-          path: /etc/romana
-      - name: host-cni-bin
-        hostPath:
-          path: /opt/cni/bin
-      - name: host-cni-net-d
-        hostPath:
-          path: /etc/cni/net.d
-      - name: run-path
-        hostPath:
-          path: /var/run/romana
----
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: romana-aws
-rules:
-- apiGroups:
-  - "*"
-  resources:
-  - nodes
-  verbs:
-  - get
-  - list
-  - watch
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: romana-aws
-  namespace: kube-system
----
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: romana-aws
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: romana-aws
-subjects:
-- kind: ServiceAccount
-  name: romana-aws
-  namespace: kube-system
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: romana-aws
-  namespace: kube-system
-  labels:
-    romana-app: aws
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      romana-app: aws
-  template:
-    metadata:
-      labels:
-        romana-app: aws
-    spec:
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-      hostNetwork: true
-      priorityClassName: system-cluster-critical
-      serviceAccountName: romana-aws
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      containers:
-      - name: romana-aws
-        image: quay.io/romana/aws:v2.0.2
-        imagePullPolicy: Always
-        resources:
-          requests:
-            cpu: 10m
-            memory: 64Mi
-          limits:
-            memory: 64Mi
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: romana-vpcrouter
-  namespace: kube-system
-  labels:
-    romana-app: vpcrouter
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      romana-app: vpcrouter
-  template:
-    metadata:
-      labels:
-        romana-app: vpcrouter
-    spec:
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-      hostNetwork: true
-      priorityClassName: system-cluster-critical
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      containers:
-      - name: romana-vpcrouter
-        image: quay.io/romana/vpcrouter-romana-plugin:1.1.17
-        imagePullPolicy: Always
-        resources:
-          requests:
-            cpu: 45m
-            memory: 128Mi
-          limits:
-            memory: 128Mi
-        args:
-        - --etcd_use_v2
-        - --etcd_addr={{ .Networking.Romana.EtcdServiceIP }}
-        - --etcd_port=12379
-`)
-
-func cloudupResourcesAddonsNetworkingRomanaK8s112YamlTemplateBytes() ([]byte, error) {
-	return _cloudupResourcesAddonsNetworkingRomanaK8s112YamlTemplate, nil
-}
-
-func cloudupResourcesAddonsNetworkingRomanaK8s112YamlTemplate() (*asset, error) {
-	bytes, err := cloudupResourcesAddonsNetworkingRomanaK8s112YamlTemplateBytes()
-	if err != nil {
-		return nil, err
-	}
-
-	info := bindataFileInfo{name: "cloudup/resources/addons/networking.romana/k8s-1.12.yaml.template", size: 0, mode: os.FileMode(0), modTime: time.Unix(0, 0)}
-	a := &asset{bytes: bytes, info: info}
-	return a, nil
-}
-
-var _cloudupResourcesAddonsNetworkingRomanaK8s17YamlTemplate = []byte(`---
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1beta1
-metadata:
-  name: romana-listener
-rules:
-- apiGroups:
-  - "*"
-  resources:
-  - pods
-  - namespaces
-  - nodes
-  - endpoints
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - extensions
-  resources:
-  - networkpolicies
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - "*"
-  resources:
-  - services
-  verbs:
-  - update
-  - list
-  - watch
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: romana-listener
-  namespace: kube-system
----
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1beta1
-metadata:
-  name: romana-listener
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: romana-listener
-subjects:
-- kind: ServiceAccount
-  name: romana-listener
-  namespace: kube-system
----
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1beta1
-metadata:
-  name: romana-agent
-rules:
-- apiGroups:
-  - "*"
-  resources:
-  - pods
-  - nodes
-  verbs:
-  - get
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: romana-agent
-  namespace: kube-system
----
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1beta1
-metadata:
-  name: romana-agent
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: romana-agent
-subjects:
-- kind: ServiceAccount
-  name: romana-agent
-  namespace: kube-system
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: romana-etcd
-  namespace: kube-system
-spec:
-  clusterIP: {{ .Networking.Romana.EtcdServiceIP }}
-  ports:
-  - name: etcd
-    port: 12379
-    protocol: TCP
-    targetPort: 4001
-  selector:
-    k8s-app: etcd-server
-  sessionAffinity: None
-  type: ClusterIP
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: romana
-  namespace: kube-system
-spec:
-  clusterIP: {{ .Networking.Romana.DaemonServiceIP }}
-  ports:
-  - name: daemon
-    port: 9600
-    protocol: TCP
-    targetPort: 9600
-  selector:
-    romana-app: daemon
-  sessionAffinity: None
-  type: ClusterIP
----
-apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  name: romana-daemon
-  namespace: kube-system
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        romana-app: daemon
-    spec:
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-      hostNetwork: true
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      containers:
-      - name: romana-daemon
-        image: quay.io/romana/daemon:v2.0.2
-        imagePullPolicy: Always
-        resources:
-          requests:
-            cpu: 10m
-            memory: 64Mi
-          limits:
-            memory: 64Mi
-        args:
-        - --cloud=aws
-        - --network-cidr-overrides=romana-network={{ .KubeControllerManager.ClusterCIDR }}
----
-apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  name: romana-listener
-  namespace: kube-system
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        romana-app: listener
-    spec:
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-      hostNetwork: true
-      serviceAccountName: romana-listener
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      containers:
-      - name: romana-listener
-        image: quay.io/romana/listener:v2.0.2
-        imagePullPolicy: Always
-        resources:
-          requests:
-            cpu: 10m
-            memory: 64Mi
-          limits:
-            memory: 64Mi
----
-apiVersion: extensions/v1beta1
-kind: DaemonSet
-metadata:
-  name: romana-agent
-  namespace: kube-system
-spec:
-  updateStrategy:
-    type: RollingUpdate
-  template:
-    metadata:
-      labels:
-        romana-app: agent
-    spec:
-      hostNetwork: true
-      securityContext:
-        seLinuxOptions:
-          type: spc_t
-      serviceAccountName: romana-agent
-      tolerations:
-      - effect: NoSchedule
-        operator: Exists
-      - effect: NoExecute
-        operator: Exists
-      containers:
-      - name: romana-agent
-        image: quay.io/romana/agent:v2.0.2
-        imagePullPolicy: Always
-        resources:
-          requests:
-            cpu: 25m
-            memory: 128Mi
-          limits:
-            memory: 128Mi
-        env:
-        - name: NODENAME
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
-        - name: NODEIP
-          valueFrom:
-            fieldRef:
-              fieldPath: status.hostIP
-        args:
-        - --service-cluster-ip-range={{ .ServiceClusterIPRange }}
-        securityContext:
-          privileged: true
-        volumeMounts:
-        - name: host-usr-local-bin
-          mountPath: /host/usr/local/bin
-        - name: host-etc-romana
-          mountPath: /host/etc/romana
-        - name: host-cni-bin
-          mountPath: /host/opt/cni/bin
-        - name: host-cni-net-d
-          mountPath: /host/etc/cni/net.d
-        - name: run-path
-          mountPath: /var/run/romana
-      volumes:
-      - name: host-usr-local-bin
-        hostPath:
-          path: /usr/local/bin
-      - name: host-etc-romana
-        hostPath:
-          path: /etc/romana
-      - name: host-cni-bin
-        hostPath:
-          path: /opt/cni/bin
-      - name: host-cni-net-d
-        hostPath:
-          path: /etc/cni/net.d
-      - name: run-path
-        hostPath:
-          path: /var/run/romana
----
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1beta1
-metadata:
-  name: romana-aws
-rules:
-- apiGroups:
-  - "*"
-  resources:
-  - nodes
-  verbs:
-  - get
-  - list
-  - watch
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: romana-aws
-  namespace: kube-system
----
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1beta1
-metadata:
-  name: romana-aws
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: romana-aws
-subjects:
-- kind: ServiceAccount
-  name: romana-aws
-  namespace: kube-system
----
-apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  name: romana-aws
-  namespace: kube-system
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        romana-app: aws
-    spec:
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-      hostNetwork: true
-      serviceAccountName: romana-aws
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      containers:
-      - name: romana-aws
-        image: quay.io/romana/aws:v2.0.2
-        imagePullPolicy: Always
-        resources:
-          requests:
-            cpu: 10m
-            memory: 64Mi
-          limits:
-            memory: 64Mi
----
-apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  name: romana-vpcrouter
-  namespace: kube-system
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        romana-app: vpcrouter
-    spec:
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-      hostNetwork: true
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      containers:
-      - name: romana-vpcrouter
-        image: quay.io/romana/vpcrouter-romana-plugin:1.1.17
-        imagePullPolicy: Always
-        resources:
-          requests:
-            cpu: 45m
-            memory: 128Mi
-          limits:
-            memory: 128Mi
-        args:
-        - --etcd_use_v2
-        - --etcd_addr={{ .Networking.Romana.EtcdServiceIP }}
-        - --etcd_port=12379
-`)
-
-func cloudupResourcesAddonsNetworkingRomanaK8s17YamlTemplateBytes() ([]byte, error) {
-	return _cloudupResourcesAddonsNetworkingRomanaK8s17YamlTemplate, nil
-}
-
-func cloudupResourcesAddonsNetworkingRomanaK8s17YamlTemplate() (*asset, error) {
-	bytes, err := cloudupResourcesAddonsNetworkingRomanaK8s17YamlTemplateBytes()
-	if err != nil {
-		return nil, err
-	}
-
-	info := bindataFileInfo{name: "cloudup/resources/addons/networking.romana/k8s-1.7.yaml.template", size: 0, mode: os.FileMode(0), modTime: time.Unix(0, 0)}
-	a := &asset{bytes: bytes, info: info}
-	return a, nil
-}
-
 var _cloudupResourcesAddonsNetworkingWeaveK8s112YamlTemplate = []byte(`{{- if WeaveSecret }}
 apiVersion: v1
 kind: Secret
@@ -14157,18 +13185,18 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: weave-net
-  namespace: kube-system
   labels:
     name: weave-net
+  namespace: kube-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: weave-net
-  namespace: kube-system
   labels:
     name: weave-net
     role.kubernetes.io/networking: "1"
+  namespace: kube-system
 rules:
   - apiGroups:
       - ''
@@ -14208,10 +13236,10 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: weave-net
-  namespace: kube-system
   labels:
     name: weave-net
     role.kubernetes.io/networking: "1"
+  namespace: kube-system
 roleRef:
   kind: ClusterRole
   name: weave-net
@@ -14265,17 +13293,17 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: weave-net
-  namespace: kube-system
   labels:
     name: weave-net
     role.kubernetes.io/networking: "1"
+  namespace: kube-system
 spec:
   # Wait 5 seconds to let pod connect before rolling next pod
-  minReadySeconds: 5
   selector:
     matchLabels:
       name: weave-net
       role.kubernetes.io/networking: "1"
+  minReadySeconds: 5
   template:
     metadata:
       labels:
@@ -14319,7 +13347,7 @@ spec:
                   name: weave-net
                   key: network-password
             {{- end }}
-          image: 'weaveworks/weave-kube:2.6.2'
+          image: 'weaveworks/weave-kube:2.6.5'
           ports:
             - name: metrics
               containerPort: 6782
@@ -14366,7 +13394,7 @@ spec:
             - name: EXTRA_ARGS
               value: "{{ .Networking.Weave.NPCExtraArgs }}"
             {{- end }}
-          image: 'weaveworks/weave-npc:2.6.2'
+          image: 'weaveworks/weave-npc:2.6.5'
           ports:
             - name: metrics
               containerPort: 6781
@@ -14457,18 +13485,18 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: weave-net
-  namespace: kube-system
   labels:
     name: weave-net
+  namespace: kube-system
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: weave-net
-  namespace: kube-system
   labels:
     name: weave-net
     role.kubernetes.io/networking: "1"
+  namespace: kube-system
 rules:
   - apiGroups:
       - ''
@@ -14504,14 +13532,14 @@ rules:
       - patch
       - update
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: weave-net
-  namespace: kube-system
   labels:
     name: weave-net
     role.kubernetes.io/networking: "1"
+  namespace: kube-system
 roleRef:
   kind: ClusterRole
   name: weave-net
@@ -14521,7 +13549,7 @@ subjects:
     name: weave-net
     namespace: kube-system
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: weave-net
@@ -14545,7 +13573,7 @@ rules:
     verbs:
       - create
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: weave-net
@@ -14565,10 +13593,10 @@ apiVersion: extensions/v1beta1
 kind: DaemonSet
 metadata:
   name: weave-net
-  namespace: kube-system
   labels:
     name: weave-net
     role.kubernetes.io/networking: "1"
+  namespace: kube-system
 spec:
   # Wait 5 seconds to let pod connect before rolling next pod
   minReadySeconds: 5
@@ -14616,7 +13644,7 @@ spec:
                   name: weave-net
                   key: network-password
             {{- end }}
-          image: 'weaveworks/weave-kube:2.6.2'
+          image: 'weaveworks/weave-kube:2.6.5'
           ports:
             - name: metrics
               containerPort: 6782
@@ -14663,7 +13691,7 @@ spec:
             - name: EXTRA_ARGS
               value: "{{ .Networking.Weave.NPCExtraArgs }}"
             {{- end }}
-          image: 'weaveworks/weave-npc:2.6.2'
+          image: 'weaveworks/weave-npc:2.6.5'
           ports:
             - name: metrics
               containerPort: 6781
@@ -15205,7 +14233,7 @@ data:
           force_tcp
         }
         prometheus :9253
-        health {{ KubeDNS.NodeLocalDNS.LocalIP }}:8080
+        health {{ KubeDNS.NodeLocalDNS.LocalIP }}:{{ NodeLocalDNSHealthCheck }}
     }
     in-addr.arpa:53 {
         errors
@@ -15304,7 +14332,7 @@ spec:
           httpGet:
             host: {{ .KubeDNS.NodeLocalDNS.LocalIP }}
             path: /health
-            port: 8080
+            port: {{ NodeLocalDNSHealthCheck }}
           initialDelaySeconds: 60
           timeoutSeconds: 5
         volumeMounts:
@@ -16053,101 +15081,6 @@ func cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s112YamlTemplate() (*as
 	return a, nil
 }
 
-var _cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s19YamlTemplate = []byte(`---
-apiVersion: extensions/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: kube-system
-spec:
-  allowedCapabilities:
-  - '*'
-  fsGroup:
-    rule: RunAsAny
-  hostPID: true
-  hostIPC: true
-  hostNetwork: true
-  hostPorts:
-  - min: 1
-    max: 65536
-  privileged: true
-  runAsUser:
-    rule: RunAsAny
-  seLinux:
-    rule: RunAsAny
-  supplementalGroups:
-    rule: RunAsAny
-  volumes:
-  - '*'
----
-apiVersion: rbac.authorization.k8s.io/v1beta1
-kind: ClusterRole
-metadata:
-  name: kops:kube-system:psp
-rules:
-- apiGroups:
-  - extensions
-  resources:
-  - podsecuritypolicies
-  resourceNames:
-  - kube-system
-  verbs:
-  - use
----
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1beta1
-metadata:
-  name: kops:kube-system:psp
-roleRef:
-  kind: ClusterRole
-  name: kops:kube-system:psp
-  apiGroup: rbac.authorization.k8s.io
-subjects:
-# permit the cluster wise admin to use this policy
-- kind: Group
-  name: system:masters
-  apiGroup: rbac.authorization.k8s.io
-# permit the kubelets to access this policy (used for manifests)
-- kind: User
-  name: kubelet
-  apiGroup: rbac.authorization.k8s.io
-## TODO: need to question whether this can move into a rolebinding?
-{{- if UseBootstrapTokens }}
-- kind: Group
-  name: system:nodes
-  apiGroup: rbac.authorization.k8s.io
-{{- end }}
----
-kind: RoleBinding
-apiVersion: rbac.authorization.k8s.io/v1beta1
-metadata:
-  name: kops:kube-system:psp
-  namespace: kube-system
-roleRef:
-  kind: ClusterRole
-  name: kops:kube-system:psp
-  apiGroup: rbac.authorization.k8s.io
-subjects:
-# permit the cluster wise admin to use this policy
-- kind: Group
-  name: system:serviceaccounts:kube-system
-  apiGroup: rbac.authorization.k8s.io
-`)
-
-func cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s19YamlTemplateBytes() ([]byte, error) {
-	return _cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s19YamlTemplate, nil
-}
-
-func cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s19YamlTemplate() (*asset, error) {
-	bytes, err := cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s19YamlTemplateBytes()
-	if err != nil {
-		return nil, err
-	}
-
-	info := bindataFileInfo{name: "cloudup/resources/addons/podsecuritypolicy.addons.k8s.io/k8s-1.9.yaml.template", size: 0, mode: os.FileMode(0), modTime: time.Unix(0, 0)}
-	a := &asset{bytes: bytes, info: info}
-	return a, nil
-}
-
 var _cloudupResourcesAddonsRbacAddonsK8sIoK8s18Yaml = []byte(`# Source: https://raw.githubusercontent.com/kubernetes/kubernetes/master/cluster/addons/rbac/kubelet-binding.yaml
 # The GKE environments don't have kubelets with certificates that
 # identify the system:nodes group.  They use the kubelet identity
@@ -16410,7 +15343,7 @@ spec:
       containers:
       - name: spotinst-kubernetes-cluster-controller
         imagePullPolicy: Always
-        image: spotinst/kubernetes-cluster-controller:1.0.57
+        image: spotinst/kubernetes-cluster-controller:1.0.58
         livenessProbe:
           httpGet:
             path: /healthcheck
@@ -16484,7 +15417,6 @@ spec:
         tolerationSeconds: 150
       - key: node-role.kubernetes.io/master
         operator: Exists
----
 `)
 
 func cloudupResourcesAddonsSpotinstKubernetesClusterControllerAddonsK8sIoV1140YamlTemplateBytes() ([]byte, error) {
@@ -16639,7 +15571,6 @@ spec:
       tolerations:
       - key: node-role.kubernetes.io/master
         effect: NoSchedule
----
 `)
 
 func cloudupResourcesAddonsSpotinstKubernetesClusterControllerAddonsK8sIoV190YamlTemplateBytes() ([]byte, error) {
@@ -16673,6 +15604,8 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: gp2
+  annotations:
+    storageclass.beta.kubernetes.io/is-default-class: "false"
   labels:
     k8s-addon: storage-aws.addons.k8s.io
 provisioner: kubernetes.io/aws-ebs
@@ -16825,44 +15758,6 @@ func cloudupResourcesAddonsStorageGceAddonsK8sIoV170Yaml() (*asset, error) {
 	return a, nil
 }
 
-var _nodeup_automatic_upgrades_debian_familyFilesEtcAptAptConfD20autoUpgrades = []byte(`APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";
-
-APT::Periodic::AutocleanInterval "7";
-`)
-
-func nodeup_automatic_upgrades_debian_familyFilesEtcAptAptConfD20autoUpgradesBytes() ([]byte, error) {
-	return _nodeup_automatic_upgrades_debian_familyFilesEtcAptAptConfD20autoUpgrades, nil
-}
-
-func nodeup_automatic_upgrades_debian_familyFilesEtcAptAptConfD20autoUpgrades() (*asset, error) {
-	bytes, err := nodeup_automatic_upgrades_debian_familyFilesEtcAptAptConfD20autoUpgradesBytes()
-	if err != nil {
-		return nil, err
-	}
-
-	info := bindataFileInfo{name: "nodeup/_automatic_upgrades/_debian_family/files/etc/apt/apt.conf.d/20auto-upgrades", size: 0, mode: os.FileMode(0), modTime: time.Unix(0, 0)}
-	a := &asset{bytes: bytes, info: info}
-	return a, nil
-}
-
-var _nodeup_automatic_upgrades_debian_familyPackagesUnattendedUpgrades = []byte(``)
-
-func nodeup_automatic_upgrades_debian_familyPackagesUnattendedUpgradesBytes() ([]byte, error) {
-	return _nodeup_automatic_upgrades_debian_familyPackagesUnattendedUpgrades, nil
-}
-
-func nodeup_automatic_upgrades_debian_familyPackagesUnattendedUpgrades() (*asset, error) {
-	bytes, err := nodeup_automatic_upgrades_debian_familyPackagesUnattendedUpgradesBytes()
-	if err != nil {
-		return nil, err
-	}
-
-	info := bindataFileInfo{name: "nodeup/_automatic_upgrades/_debian_family/packages/unattended-upgrades", size: 0, mode: os.FileMode(0), modTime: time.Unix(0, 0)}
-	a := &asset{bytes: bytes, info: info}
-	return a, nil
-}
-
 var _nodeupResources_lyft_vpc_cniFilesEtcCniNetD10CniIpvlanVpcK8sConflistTemplate = []byte(`{
   "cniVersion": "0.3.1",
   "name": "cni-ipvlan-vpc-k8s",
@@ -16987,7 +15882,6 @@ var _bindata = map[string]func() (*asset, error){
 	"cloudup/resources/addons/networking.amazon-vpc-routed-eni/k8s-1.10.yaml.template":                    cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s110YamlTemplate,
 	"cloudup/resources/addons/networking.amazon-vpc-routed-eni/k8s-1.12.yaml.template":                    cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s112YamlTemplate,
 	"cloudup/resources/addons/networking.amazon-vpc-routed-eni/k8s-1.16.yaml.template":                    cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s116YamlTemplate,
-	"cloudup/resources/addons/networking.amazon-vpc-routed-eni/k8s-1.8.yaml.template":                     cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s18YamlTemplate,
 	"cloudup/resources/addons/networking.cilium.io/k8s-1.12.yaml.template":                                cloudupResourcesAddonsNetworkingCiliumIoK8s112YamlTemplate,
 	"cloudup/resources/addons/networking.cilium.io/k8s-1.7.yaml.template":                                 cloudupResourcesAddonsNetworkingCiliumIoK8s17YamlTemplate,
 	"cloudup/resources/addons/networking.flannel/k8s-1.12.yaml.template":                                  cloudupResourcesAddonsNetworkingFlannelK8s112YamlTemplate,
@@ -17004,8 +15898,6 @@ var _bindata = map[string]func() (*asset, error){
 	"cloudup/resources/addons/networking.projectcalico.org.canal/k8s-1.15.yaml.template":                  cloudupResourcesAddonsNetworkingProjectcalicoOrgCanalK8s115YamlTemplate,
 	"cloudup/resources/addons/networking.projectcalico.org.canal/k8s-1.16.yaml.template":                  cloudupResourcesAddonsNetworkingProjectcalicoOrgCanalK8s116YamlTemplate,
 	"cloudup/resources/addons/networking.projectcalico.org.canal/k8s-1.9.yaml.template":                   cloudupResourcesAddonsNetworkingProjectcalicoOrgCanalK8s19YamlTemplate,
-	"cloudup/resources/addons/networking.romana/k8s-1.12.yaml.template":                                   cloudupResourcesAddonsNetworkingRomanaK8s112YamlTemplate,
-	"cloudup/resources/addons/networking.romana/k8s-1.7.yaml.template":                                    cloudupResourcesAddonsNetworkingRomanaK8s17YamlTemplate,
 	"cloudup/resources/addons/networking.weave/k8s-1.12.yaml.template":                                    cloudupResourcesAddonsNetworkingWeaveK8s112YamlTemplate,
 	"cloudup/resources/addons/networking.weave/k8s-1.8.yaml.template":                                     cloudupResourcesAddonsNetworkingWeaveK8s18YamlTemplate,
 	"cloudup/resources/addons/node-authorizer.addons.k8s.io/k8s-1.10.yaml.template":                       cloudupResourcesAddonsNodeAuthorizerAddonsK8sIoK8s110YamlTemplate,
@@ -17016,7 +15908,6 @@ var _bindata = map[string]func() (*asset, error){
 	"cloudup/resources/addons/openstack.addons.k8s.io/k8s-1.13.yaml.template":                             cloudupResourcesAddonsOpenstackAddonsK8sIoK8s113YamlTemplate,
 	"cloudup/resources/addons/podsecuritypolicy.addons.k8s.io/k8s-1.10.yaml.template":                     cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s110YamlTemplate,
 	"cloudup/resources/addons/podsecuritypolicy.addons.k8s.io/k8s-1.12.yaml.template":                     cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s112YamlTemplate,
-	"cloudup/resources/addons/podsecuritypolicy.addons.k8s.io/k8s-1.9.yaml.template":                      cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s19YamlTemplate,
 	"cloudup/resources/addons/rbac.addons.k8s.io/k8s-1.8.yaml":                                            cloudupResourcesAddonsRbacAddonsK8sIoK8s18Yaml,
 	"cloudup/resources/addons/scheduler.addons.k8s.io/v1.7.0.yaml":                                        cloudupResourcesAddonsSchedulerAddonsK8sIoV170Yaml,
 	"cloudup/resources/addons/spotinst-kubernetes-cluster-controller.addons.k8s.io/v1.14.0.yaml.template": cloudupResourcesAddonsSpotinstKubernetesClusterControllerAddonsK8sIoV1140YamlTemplate,
@@ -17024,8 +15915,6 @@ var _bindata = map[string]func() (*asset, error){
 	"cloudup/resources/addons/storage-aws.addons.k8s.io/v1.15.0.yaml":                                     cloudupResourcesAddonsStorageAwsAddonsK8sIoV1150Yaml,
 	"cloudup/resources/addons/storage-aws.addons.k8s.io/v1.7.0.yaml":                                      cloudupResourcesAddonsStorageAwsAddonsK8sIoV170Yaml,
 	"cloudup/resources/addons/storage-gce.addons.k8s.io/v1.7.0.yaml":                                      cloudupResourcesAddonsStorageGceAddonsK8sIoV170Yaml,
-	"nodeup/_automatic_upgrades/_debian_family/files/etc/apt/apt.conf.d/20auto-upgrades":                  nodeup_automatic_upgrades_debian_familyFilesEtcAptAptConfD20autoUpgrades,
-	"nodeup/_automatic_upgrades/_debian_family/packages/unattended-upgrades":                              nodeup_automatic_upgrades_debian_familyPackagesUnattendedUpgrades,
 	"nodeup/resources/_lyft_vpc_cni/files/etc/cni/net.d/10-cni-ipvlan-vpc-k8s.conflist.template":          nodeupResources_lyft_vpc_cniFilesEtcCniNetD10CniIpvlanVpcK8sConflistTemplate,
 }
 
@@ -17127,7 +16016,6 @@ var _bintree = &bintree{nil, map[string]*bintree{
 					"k8s-1.10.yaml.template": {cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s110YamlTemplate, map[string]*bintree{}},
 					"k8s-1.12.yaml.template": {cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s112YamlTemplate, map[string]*bintree{}},
 					"k8s-1.16.yaml.template": {cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s116YamlTemplate, map[string]*bintree{}},
-					"k8s-1.8.yaml.template":  {cloudupResourcesAddonsNetworkingAmazonVpcRoutedEniK8s18YamlTemplate, map[string]*bintree{}},
 				}},
 				"networking.cilium.io": {nil, map[string]*bintree{
 					"k8s-1.12.yaml.template": {cloudupResourcesAddonsNetworkingCiliumIoK8s112YamlTemplate, map[string]*bintree{}},
@@ -17157,10 +16045,6 @@ var _bintree = &bintree{nil, map[string]*bintree{
 					"k8s-1.16.yaml.template": {cloudupResourcesAddonsNetworkingProjectcalicoOrgCanalK8s116YamlTemplate, map[string]*bintree{}},
 					"k8s-1.9.yaml.template":  {cloudupResourcesAddonsNetworkingProjectcalicoOrgCanalK8s19YamlTemplate, map[string]*bintree{}},
 				}},
-				"networking.romana": {nil, map[string]*bintree{
-					"k8s-1.12.yaml.template": {cloudupResourcesAddonsNetworkingRomanaK8s112YamlTemplate, map[string]*bintree{}},
-					"k8s-1.7.yaml.template":  {cloudupResourcesAddonsNetworkingRomanaK8s17YamlTemplate, map[string]*bintree{}},
-				}},
 				"networking.weave": {nil, map[string]*bintree{
 					"k8s-1.12.yaml.template": {cloudupResourcesAddonsNetworkingWeaveK8s112YamlTemplate, map[string]*bintree{}},
 					"k8s-1.8.yaml.template":  {cloudupResourcesAddonsNetworkingWeaveK8s18YamlTemplate, map[string]*bintree{}},
@@ -17180,7 +16064,6 @@ var _bintree = &bintree{nil, map[string]*bintree{
 				"podsecuritypolicy.addons.k8s.io": {nil, map[string]*bintree{
 					"k8s-1.10.yaml.template": {cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s110YamlTemplate, map[string]*bintree{}},
 					"k8s-1.12.yaml.template": {cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s112YamlTemplate, map[string]*bintree{}},
-					"k8s-1.9.yaml.template":  {cloudupResourcesAddonsPodsecuritypolicyAddonsK8sIoK8s19YamlTemplate, map[string]*bintree{}},
 				}},
 				"rbac.addons.k8s.io": {nil, map[string]*bintree{
 					"k8s-1.8.yaml": {cloudupResourcesAddonsRbacAddonsK8sIoK8s18Yaml, map[string]*bintree{}},
@@ -17203,22 +16086,6 @@ var _bintree = &bintree{nil, map[string]*bintree{
 		}},
 	}},
 	"nodeup": {nil, map[string]*bintree{
-		"_automatic_upgrades": {nil, map[string]*bintree{
-			"_debian_family": {nil, map[string]*bintree{
-				"files": {nil, map[string]*bintree{
-					"etc": {nil, map[string]*bintree{
-						"apt": {nil, map[string]*bintree{
-							"apt.conf.d": {nil, map[string]*bintree{
-								"20auto-upgrades": {nodeup_automatic_upgrades_debian_familyFilesEtcAptAptConfD20autoUpgrades, map[string]*bintree{}},
-							}},
-						}},
-					}},
-				}},
-				"packages": {nil, map[string]*bintree{
-					"unattended-upgrades": {nodeup_automatic_upgrades_debian_familyPackagesUnattendedUpgrades, map[string]*bintree{}},
-				}},
-			}},
-		}},
 		"resources": {nil, map[string]*bintree{
 			"_lyft_vpc_cni": {nil, map[string]*bintree{
 				"files": {nil, map[string]*bintree{

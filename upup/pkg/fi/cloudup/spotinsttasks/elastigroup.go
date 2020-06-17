@@ -50,6 +50,7 @@ type Elastigroup struct {
 	SpotPercentage           *float64
 	UtilizeReservedInstances *bool
 	FallbackToOnDemand       *bool
+	DrainingTimeout          *int64
 	HealthCheckType          *string
 	Product                  *string
 	Orientation              *string
@@ -186,6 +187,10 @@ func (e *Elastigroup) Find(c *fi.Context) (*Elastigroup, error) {
 		actual.Orientation = group.Strategy.AvailabilityVsCost
 		actual.FallbackToOnDemand = group.Strategy.FallbackToOnDemand
 		actual.UtilizeReservedInstances = group.Strategy.UtilizeReservedInstances
+
+		if group.Strategy.DrainingTimeout != nil {
+			actual.DrainingTimeout = fi.Int64(int64(fi.IntValue(group.Strategy.DrainingTimeout)))
+		}
 	}
 
 	// Compute.
@@ -479,6 +484,10 @@ func (_ *Elastigroup) create(cloud awsup.AWSCloud, a, e, changes *Elastigroup) e
 		group.Strategy.SetAvailabilityVsCost(fi.String(string(normalizeOrientation(e.Orientation))))
 		group.Strategy.SetFallbackToOnDemand(e.FallbackToOnDemand)
 		group.Strategy.SetUtilizeReservedInstances(e.UtilizeReservedInstances)
+
+		if e.DrainingTimeout != nil {
+			group.Strategy.SetDrainingTimeout(fi.Int(int(*e.DrainingTimeout)))
+		}
 	}
 
 	// Compute.
@@ -519,7 +528,7 @@ func (_ *Elastigroup) create(cloud awsup.AWSCloud, a, e, changes *Elastigroup) e
 					return err
 				}
 
-				ephemeralDevices, err := e.buildEphemeralDevices(e.OnDemandInstanceType)
+				ephemeralDevices, err := e.buildEphemeralDevices(cloud, e.OnDemandInstanceType)
 				if err != nil {
 					return err
 				}
@@ -782,6 +791,17 @@ func (_ *Elastigroup) update(cloud awsup.AWSCloud, a, e, changes *Elastigroup) e
 			changes.UtilizeReservedInstances = nil
 			changed = true
 		}
+
+		// Draining timeout.
+		if changes.DrainingTimeout != nil {
+			if group.Strategy == nil {
+				group.Strategy = new(aws.Strategy)
+			}
+
+			group.Strategy.SetDrainingTimeout(fi.Int(int(*e.DrainingTimeout)))
+			changes.DrainingTimeout = nil
+			changed = true
+		}
 	}
 
 	// Compute.
@@ -936,7 +956,7 @@ func (_ *Elastigroup) update(cloud awsup.AWSCloud, a, e, changes *Elastigroup) e
 								return err
 							}
 
-							ephemeralDevices, err := e.buildEphemeralDevices(e.OnDemandInstanceType)
+							ephemeralDevices, err := e.buildEphemeralDevices(cloud, e.OnDemandInstanceType)
 							if err != nil {
 								return err
 							}
@@ -1275,6 +1295,7 @@ type terraformElastigroupStrategy struct {
 	Orientation              *string  `json:"orientation,omitempty" cty:"orientation"`
 	FallbackToOnDemand       *bool    `json:"fallback_to_ondemand,omitempty" cty:"fallback_to_ondemand"`
 	UtilizeReservedInstances *bool    `json:"utilize_reserved_instances,omitempty" cty:"utilize_reserved_instances"`
+	DrainingTimeout          *int64   `json:"draining_timeout,omitempty" cty:"draining_timeout"`
 }
 
 type terraformElastigroupInstanceTypes struct {
@@ -1365,6 +1386,7 @@ func (_ *Elastigroup) RenderTerraform(t *terraform.TerraformTarget, a, e, change
 			Orientation:              fi.String(string(normalizeOrientation(e.Orientation))),
 			FallbackToOnDemand:       e.FallbackToOnDemand,
 			UtilizeReservedInstances: e.UtilizeReservedInstances,
+			DrainingTimeout:          e.DrainingTimeout,
 		},
 		terraformElastigroupInstanceTypes: &terraformElastigroupInstanceTypes{
 			OnDemand: e.OnDemandInstanceType,
@@ -1408,7 +1430,7 @@ func (_ *Elastigroup) RenderTerraform(t *terraform.TerraformTarget, a, e, change
 	// User data.
 	if e.UserData != nil {
 		var err error
-		tf.UserData, err = t.AddFile("spotinst_elastigroup_aws", *e.Name, "user_data", e.UserData)
+		tf.UserData, err = t.AddFile("spotinst_elastigroup_aws", *e.Name, "user_data", e.UserData, false)
 		if err != nil {
 			return err
 		}
@@ -1472,7 +1494,7 @@ func (_ *Elastigroup) RenderTerraform(t *terraform.TerraformTarget, a, e, change
 					return err
 				}
 
-				ephemeralDevices, err := e.buildEphemeralDevices(e.OnDemandInstanceType)
+				ephemeralDevices, err := e.buildEphemeralDevices(cloud, e.OnDemandInstanceType)
 				if err != nil {
 					return err
 				}
@@ -1616,12 +1638,12 @@ func (e *Elastigroup) buildAutoScaleLabels(labelsMap map[string]string) []*aws.A
 	return labels
 }
 
-func (e *Elastigroup) buildEphemeralDevices(instanceTypeName *string) (map[string]*awstasks.BlockDeviceMapping, error) {
+func (e *Elastigroup) buildEphemeralDevices(c awsup.AWSCloud, instanceTypeName *string) (map[string]*awstasks.BlockDeviceMapping, error) {
 	if instanceTypeName == nil {
 		return nil, fi.RequiredField("InstanceType")
 	}
 
-	instanceType, err := awsup.GetMachineTypeInfo(*instanceTypeName)
+	instanceType, err := awsup.GetMachineTypeInfo(c, *instanceTypeName)
 	if err != nil {
 		return nil, err
 	}

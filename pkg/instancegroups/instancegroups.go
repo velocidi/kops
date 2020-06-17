@@ -39,13 +39,13 @@ import (
 const rollingUpdateTaintKey = "kops.k8s.io/scheduled-for-update"
 
 // promptInteractive asks the user to continue, mostly copied from vendor/google.golang.org/api/examples/gmail.go.
-func promptInteractive(upgradedHostId, upgradedHostName string) (stopPrompting bool, err error) {
+func promptInteractive(upgradedHostID, upgradedHostName string) (stopPrompting bool, err error) {
 	stopPrompting = false
 	scanner := bufio.NewScanner(os.Stdin)
 	if upgradedHostName != "" {
-		klog.Infof("Pausing after finished %q, node %q", upgradedHostId, upgradedHostName)
+		klog.Infof("Pausing after finished %q, node %q", upgradedHostID, upgradedHostName)
 	} else {
-		klog.Infof("Pausing after finished %q", upgradedHostId)
+		klog.Infof("Pausing after finished %q", upgradedHostID)
 	}
 	fmt.Print("Continue? (Y)es, (N)o, (A)lwaysYes: [Y] ")
 	scanner.Scan()
@@ -88,16 +88,8 @@ func (c *RollingUpdateCluster) rollingUpdateInstanceGroup(ctx context.Context, c
 
 	if isBastion {
 		klog.V(3).Info("Not validating the cluster as instance is a bastion.")
-	} else if c.CloudOnly {
-		klog.V(3).Info("Not validating cluster as validation is turned off via the cloud-only flag.")
-	} else {
-		if err = c.validateCluster(); err != nil {
-			if c.FailOnValidate {
-				return err
-			}
-			klog.V(2).Infof("Ignoring cluster validation error: %v", err)
-			klog.Info("Cluster validation failed, but proceeding since fail-on-validate-error is set to false")
-		}
+	} else if err = c.maybeValidate("", 1); err != nil {
+		return err
 	}
 
 	if !c.CloudOnly {
@@ -156,7 +148,7 @@ func (c *RollingUpdateCluster) rollingUpdateInstanceGroup(ctx context.Context, c
 					klog.Infof("waiting for %v after detaching instance", sleepAfterTerminate)
 					time.Sleep(sleepAfterTerminate)
 
-					if err := c.maybeValidate(c.ValidationTimeout, "detaching"); err != nil {
+					if err := c.maybeValidate(" after detaching instance", c.ValidateCount); err != nil {
 						return err
 					}
 					noneReady = false
@@ -185,7 +177,7 @@ func (c *RollingUpdateCluster) rollingUpdateInstanceGroup(ctx context.Context, c
 			return waitForPendingBeforeReturningError(runningDrains, terminateChan, err)
 		}
 
-		err = c.maybeValidate(c.ValidationTimeout, "removing")
+		err = c.maybeValidate(" after terminating instance", c.ValidateCount)
 		if err != nil {
 			return waitForPendingBeforeReturningError(runningDrains, terminateChan, err)
 		}
@@ -231,7 +223,7 @@ func (c *RollingUpdateCluster) rollingUpdateInstanceGroup(ctx context.Context, c
 			}
 		}
 
-		err = c.maybeValidate(c.ValidationTimeout, "removing")
+		err = c.maybeValidate(" after terminating instance", c.ValidateCount)
 		if err != nil {
 			return err
 		}
@@ -329,7 +321,7 @@ func (c *RollingUpdateCluster) patchTaint(ctx context.Context, node *corev1.Node
 }
 
 func (c *RollingUpdateCluster) drainTerminateAndWait(ctx context.Context, u *cloudinstances.CloudInstanceGroupMember, isBastion bool, sleepAfterTerminate time.Duration) error {
-	instanceId := u.ID
+	instanceID := u.ID
 
 	nodeName := ""
 	if u.Node != nil {
@@ -354,7 +346,7 @@ func (c *RollingUpdateCluster) drainTerminateAndWait(ctx context.Context, u *clo
 				klog.Infof("Ignoring error draining node %q: %v", nodeName, err)
 			}
 		} else {
-			klog.Warningf("Skipping drain of instance %q, because it is not registered in kubernetes", instanceId)
+			klog.Warningf("Skipping drain of instance %q, because it is not registered in kubernetes", instanceID)
 		}
 	}
 
@@ -362,7 +354,7 @@ func (c *RollingUpdateCluster) drainTerminateAndWait(ctx context.Context, u *clo
 	// (It often seems like GCE tries to re-use names)
 	if !isBastion && !c.CloudOnly {
 		if u.Node == nil {
-			klog.Warningf("no kubernetes Node associated with %s, skipping node deletion", instanceId)
+			klog.Warningf("no kubernetes Node associated with %s, skipping node deletion", instanceID)
 		} else {
 			klog.Infof("deleting node %q from kubernetes", nodeName)
 			if err := c.deleteNode(ctx, u.Node); err != nil {
@@ -372,7 +364,7 @@ func (c *RollingUpdateCluster) drainTerminateAndWait(ctx context.Context, u *clo
 	}
 
 	if err := c.deleteInstance(u); err != nil {
-		klog.Errorf("error deleting instance %q, node %q: %v", instanceId, nodeName, err)
+		klog.Errorf("error deleting instance %q, node %q: %v", instanceID, nodeName, err)
 		return err
 	}
 
@@ -383,42 +375,34 @@ func (c *RollingUpdateCluster) drainTerminateAndWait(ctx context.Context, u *clo
 	return nil
 }
 
-func (c *RollingUpdateCluster) maybeValidate(validationTimeout time.Duration, operation string) error {
+func (c *RollingUpdateCluster) maybeValidate(operation string, validateCount int) error {
 	if c.CloudOnly {
 		klog.Warningf("Not validating cluster as cloudonly flag is set.")
 
 	} else {
 		klog.Info("Validating the cluster.")
 
-		if err := c.validateClusterWithDuration(validationTimeout); err != nil {
+		if err := c.validateClusterWithTimeout(validateCount); err != nil {
 
 			if c.FailOnValidate {
-				klog.Errorf("Cluster did not validate within %s", validationTimeout)
-				return fmt.Errorf("error validating cluster after %s a node: %v", operation, err)
+				klog.Errorf("Cluster did not validate within %s", c.ValidationTimeout)
+				return fmt.Errorf("error validating cluster%s: %v", operation, err)
 			}
 
-			klog.Warningf("Cluster validation failed after %s instance, proceeding since fail-on-validate is set to false: %v", operation, err)
+			klog.Warningf("Cluster validation failed%s, proceeding since fail-on-validate is set to false: %v", operation, err)
 		}
 	}
 	return nil
 }
 
-// validateClusterWithDuration runs validation.ValidateCluster until either we get positive result or the timeout expires
-func (c *RollingUpdateCluster) validateClusterWithDuration(validationTimeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), validationTimeout)
+// validateClusterWithTimeout runs validation.ValidateCluster until either we get positive result or the timeout expires
+func (c *RollingUpdateCluster) validateClusterWithTimeout(validateCount int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), c.ValidationTimeout)
 	defer cancel()
 
-	if c.tryValidateCluster(ctx) {
-		return nil
-	}
-
-	return fmt.Errorf("cluster did not validate within a duration of %q", validationTimeout)
-}
-
-func (c *RollingUpdateCluster) tryValidateCluster(ctx context.Context) bool {
-	if c.ValidateCount == 0 {
+	if validateCount == 0 {
 		klog.Warningf("skipping cluster validation because validate-count was 0")
-		return true
+		return nil
 	}
 
 	successCount := 0
@@ -428,20 +412,19 @@ func (c *RollingUpdateCluster) tryValidateCluster(ctx context.Context) bool {
 		result, err := c.ClusterValidator.Validate()
 		if err == nil && len(result.Failures) == 0 {
 			successCount++
-			if successCount >= c.ValidateCount {
+			if successCount >= validateCount {
 				klog.Info("Cluster validated.")
-				return true
-			} else {
-				klog.Infof("Cluster validated; revalidating in %s to make sure it does not flap.", c.ValidateSuccessDuration)
-				time.Sleep(c.ValidateSuccessDuration)
-				continue
+				return nil
 			}
+			klog.Infof("Cluster validated; revalidating in %s to make sure it does not flap.", c.ValidateSuccessDuration)
+			time.Sleep(c.ValidateSuccessDuration)
+			continue
 		}
 
 		if err != nil {
 			if ctx.Err() != nil {
 				klog.Infof("Cluster did not validate within deadline: %v.", err)
-				return false
+				break
 			}
 			klog.Infof("Cluster did not validate, will retry in %q: %v.", c.ValidateTickDuration, err)
 		} else if len(result.Failures) > 0 {
@@ -451,7 +434,7 @@ func (c *RollingUpdateCluster) tryValidateCluster(ctx context.Context) bool {
 			}
 			if ctx.Err() != nil {
 				klog.Infof("Cluster did not pass validation within deadline: %s.", strings.Join(messages, ", "))
-				return false
+				break
 			}
 			klog.Infof("Cluster did not pass validation, will retry in %q: %s.", c.ValidateTickDuration, strings.Join(messages, ", "))
 		}
@@ -463,23 +446,8 @@ func (c *RollingUpdateCluster) tryValidateCluster(ctx context.Context) bool {
 		// TODO: Should we check if we have enough time left before the deadline?
 		time.Sleep(c.ValidateTickDuration)
 	}
-}
 
-// validateCluster runs our validation methods on the K8s Cluster.
-func (c *RollingUpdateCluster) validateCluster() error {
-	result, err := c.ClusterValidator.Validate()
-	if err != nil {
-		return fmt.Errorf("cluster %q did not validate: %v", c.ClusterName, err)
-	}
-	if len(result.Failures) > 0 {
-		messages := []string{}
-		for _, failure := range result.Failures {
-			messages = append(messages, failure.Message)
-		}
-		return fmt.Errorf("cluster %q did not pass validation: %s", c.ClusterName, strings.Join(messages, ", "))
-	}
-
-	return nil
+	return fmt.Errorf("cluster did not validate within a duration of %q", c.ValidationTimeout)
 }
 
 // detachInstance detaches a Cloud Instance
@@ -498,9 +466,8 @@ func (c *RollingUpdateCluster) detachInstance(u *cloudinstances.CloudInstanceGro
 	if err := c.Cloud.DetachInstance(u); err != nil {
 		if nodeName != "" {
 			return fmt.Errorf("error detaching instance %q, node %q: %v", id, nodeName, err)
-		} else {
-			return fmt.Errorf("error detaching instance %q: %v", id, err)
 		}
+		return fmt.Errorf("error detaching instance %q: %v", id, err)
 	}
 
 	return nil
@@ -522,9 +489,8 @@ func (c *RollingUpdateCluster) deleteInstance(u *cloudinstances.CloudInstanceGro
 	if err := c.Cloud.DeleteInstance(u); err != nil {
 		if nodeName != "" {
 			return fmt.Errorf("error deleting instance %q, node %q: %v", id, nodeName, err)
-		} else {
-			return fmt.Errorf("error deleting instance %q: %v", id, err)
 		}
+		return fmt.Errorf("error deleting instance %q: %v", id, err)
 	}
 
 	return nil

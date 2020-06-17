@@ -128,7 +128,15 @@ func (t *LaunchTemplate) RenderAWS(c *awsup.AWSAPITarget, a, ep, changes *Launch
 		}
 		lc.UserData = aws.String(base64.StdEncoding.EncodeToString(d))
 	}
-
+	// @step: add instanceInterruptionBehavior
+	if t.InstanceInterruptionBehavior != nil {
+		s := &ec2.LaunchTemplateSpotMarketOptionsRequest{
+			InstanceInterruptionBehavior: t.InstanceInterruptionBehavior,
+		}
+		lc.InstanceMarketOptions = &ec2.LaunchTemplateInstanceMarketOptionsRequest{
+			SpotOptions: s,
+		}
+	}
 	// @step: attempt to create the launch template
 	err = func() error {
 		for attempt := 0; attempt < 10; attempt++ {
@@ -195,15 +203,14 @@ func (t *LaunchTemplate) Find(c *fi.Context) (*LaunchTemplate, error) {
 	for _, x := range lt.LaunchTemplateData.NetworkInterfaces {
 		if aws.BoolValue(x.AssociatePublicIpAddress) {
 			actual.AssociatePublicIP = fi.Bool(true)
-			// @note: not sure i like this https://github.com/hashicorp/terraform/issues/2998
-			for _, id := range x.Groups {
-				actual.SecurityGroups = append(actual.SecurityGroups, &SecurityGroup{ID: id})
-			}
+		}
+		for _, id := range x.Groups {
+			actual.SecurityGroups = append(actual.SecurityGroups, &SecurityGroup{ID: id})
 		}
 	}
-	// @step: add at the security groups
+	// In older Kops versions, security groups were added to LaunchTemplateData.SecurityGroupIds
 	for _, id := range lt.LaunchTemplateData.SecurityGroupIds {
-		actual.SecurityGroups = append(actual.SecurityGroups, &SecurityGroup{ID: id})
+		actual.SecurityGroups = append(actual.SecurityGroups, &SecurityGroup{ID: fi.String("legacy-" + *id)})
 	}
 	sort.Sort(OrderSecurityGroupsById(actual.SecurityGroups))
 
@@ -222,6 +229,10 @@ func (t *LaunchTemplate) Find(c *fi.Context) (*LaunchTemplate, error) {
 	// @step: add a instance if there is one
 	if lt.LaunchTemplateData.IamInstanceProfile != nil {
 		actual.IAMInstanceProfile = &IAMInstanceProfile{Name: lt.LaunchTemplateData.IamInstanceProfile.Name}
+	}
+	// @step: add instanceInterruptionBehavior if there is one
+	if lt.LaunchTemplateData.InstanceMarketOptions != nil && lt.LaunchTemplateData.InstanceMarketOptions.SpotOptions != nil {
+		actual.InstanceInterruptionBehavior = lt.LaunchTemplateData.InstanceMarketOptions.SpotOptions.InstanceInterruptionBehavior
 	}
 
 	// @step: get the image is order to find out the root device name as using the index

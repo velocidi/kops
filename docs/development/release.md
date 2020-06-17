@@ -80,6 +80,8 @@ make ci
 # For versions prior to 1.18: make dns-controller-push DOCKER_REGISTRY=kope
 make dns-controller-push DOCKER_IMAGE_PREFIX=kope/  DOCKER_REGISTRY=index.docker.io
 
+make kube-apiserver-healthcheck-push DOCKER_IMAGE_PREFIX=kope/  DOCKER_REGISTRY=index.docker.io
+
 make kops-controller-push DOCKER_IMAGE_PREFIX=kope/  DOCKER_REGISTRY=index.docker.io
 ```
 
@@ -129,7 +131,7 @@ e.g.
 FROM=1.14.0
 TO=1.14.1
 DOC=1.14
-git log ${FROM}..${TO} --oneline | grep Merge.pull | cut -f 5 -d ' ' | tac  > /tmp/prs
+git log ${FROM}..${TO} --oneline | grep Merge.pull | grep -v Revert..Merge.pull | cut -f 5 -d ' ' | tac  > /tmp/prs
 echo -e "\n## ${FROM} to ${TO}\n"  >> docs/releases/${DOC}-NOTES.md
 relnotes  -config .shipbot.yaml  < /tmp/prs  >> docs/releases/${DOC}-NOTES.md
 ```

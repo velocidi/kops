@@ -3,7 +3,7 @@ Name: etcd-clients-ca
 Signer: null
 alternateNameTasks: null
 alternateNames: null
-format: v1alpha2
+oldFormat: false
 subject: cn=etcd-clients-ca
 type: ca
 ---
@@ -12,7 +12,7 @@ Name: etcd-manager-ca-events
 Signer: null
 alternateNameTasks: null
 alternateNames: null
-format: v1alpha2
+oldFormat: false
 subject: cn=etcd-manager-ca-events
 type: ca
 ---
@@ -21,7 +21,7 @@ Name: etcd-manager-ca-main
 Signer: null
 alternateNameTasks: null
 alternateNames: null
-format: v1alpha2
+oldFormat: false
 subject: cn=etcd-manager-ca-main
 type: ca
 ---
@@ -30,7 +30,7 @@ Name: etcd-peers-ca-events
 Signer: null
 alternateNameTasks: null
 alternateNames: null
-format: v1alpha2
+oldFormat: false
 subject: cn=etcd-peers-ca-events
 type: ca
 ---
@@ -39,7 +39,7 @@ Name: etcd-peers-ca-main
 Signer: null
 alternateNameTasks: null
 alternateNames: null
-format: v1alpha2
+oldFormat: false
 subject: cn=etcd-peers-ca-main
 type: ca
 ---
@@ -89,7 +89,7 @@ Contents:
           --v=6 --volume-name-tag=k8s.io/etcd/events --volume-provider=aws --volume-tag=k8s.io/etcd/events
           --volume-tag=k8s.io/role/master=1 --volume-tag=kubernetes.io/cluster/minimal.example.com=owned
           > /tmp/pipe 2>&1
-        image: kopeio/etcd-manager:3.0.20200429
+        image: kopeio/etcd-manager:3.0.20200531
         name: etcd-manager
         resources:
           requests:
@@ -160,7 +160,7 @@ Contents:
           --v=6 --volume-name-tag=k8s.io/etcd/main --volume-provider=aws --volume-tag=k8s.io/etcd/main
           --volume-tag=k8s.io/role/master=1 --volume-tag=kubernetes.io/cluster/minimal.example.com=owned
           > /tmp/pipe 2>&1
-        image: kopeio/etcd-manager:3.0.20200429
+        image: kopeio/etcd-manager:3.0.20200531
         name: etcd-manager
         resources:
           requests:
