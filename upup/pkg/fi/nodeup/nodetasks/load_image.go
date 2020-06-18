@@ -74,10 +74,6 @@ func (t *LoadImageTask) GetName() *string {
 	return &t.Name
 }
 
-func (t *LoadImageTask) SetName(name string) {
-	klog.Fatalf("SetName not supported for LoadImageTask")
-}
-
 func (t *LoadImageTask) String() string {
 	return fmt.Sprintf("LoadImageTask: %v", t.Sources)
 }
@@ -159,7 +155,7 @@ func (_ *LoadImageTask) RenderLocal(t *local.LocalTarget, a, e, changes *LoadIma
 	case "docker":
 		args = []string{"docker", "load", "-i", tarFile}
 	case "containerd":
-		args = []string{"ctr", "images", "import", tarFile}
+		args = []string{"ctr", "--namespace", "k8s.io", "images", "import", tarFile}
 	default:
 		return fmt.Errorf("unknown container runtime: %s", runtime)
 	}

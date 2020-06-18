@@ -1292,6 +1292,8 @@ func autoConvert_v1alpha2_CalicoNetworkingSpec_To_kops_CalicoNetworkingSpec(in *
 	out.MajorVersion = in.MajorVersion
 	out.IptablesBackend = in.IptablesBackend
 	out.IPIPMode = in.IPIPMode
+	out.IPv4AutoDetectionMethod = in.IPv4AutoDetectionMethod
+	out.IPv6AutoDetectionMethod = in.IPv6AutoDetectionMethod
 	out.TyphaPrometheusMetricsEnabled = in.TyphaPrometheusMetricsEnabled
 	out.TyphaPrometheusMetricsPort = in.TyphaPrometheusMetricsPort
 	out.TyphaReplicas = in.TyphaReplicas
@@ -1313,6 +1315,8 @@ func autoConvert_kops_CalicoNetworkingSpec_To_v1alpha2_CalicoNetworkingSpec(in *
 	out.PrometheusGoMetricsEnabled = in.PrometheusGoMetricsEnabled
 	out.PrometheusProcessMetricsEnabled = in.PrometheusProcessMetricsEnabled
 	out.MajorVersion = in.MajorVersion
+	out.IPv4AutoDetectionMethod = in.IPv4AutoDetectionMethod
+	out.IPv6AutoDetectionMethod = in.IPv6AutoDetectionMethod
 	out.IptablesBackend = in.IptablesBackend
 	out.IPIPMode = in.IPIPMode
 	out.TyphaPrometheusMetricsEnabled = in.TyphaPrometheusMetricsEnabled
@@ -1391,6 +1395,7 @@ func autoConvert_v1alpha2_CiliumNetworkingSpec_To_kops_CiliumNetworkingSpec(in *
 	out.EnablePolicy = in.EnablePolicy
 	out.EnableTracing = in.EnableTracing
 	out.EnablePrometheusMetrics = in.EnablePrometheusMetrics
+	out.EnableEncryption = in.EnableEncryption
 	out.EnvoyLog = in.EnvoyLog
 	out.Ipv4ClusterCIDRMaskSize = in.Ipv4ClusterCIDRMaskSize
 	out.Ipv4Node = in.Ipv4Node
@@ -1473,6 +1478,7 @@ func autoConvert_kops_CiliumNetworkingSpec_To_v1alpha2_CiliumNetworkingSpec(in *
 	out.EnablePolicy = in.EnablePolicy
 	out.EnableTracing = in.EnableTracing
 	out.EnablePrometheusMetrics = in.EnablePrometheusMetrics
+	out.EnableEncryption = in.EnableEncryption
 	out.EnvoyLog = in.EnvoyLog
 	out.Ipv4ClusterCIDRMaskSize = in.Ipv4ClusterCIDRMaskSize
 	out.Ipv4Node = in.Ipv4Node
@@ -1558,6 +1564,7 @@ func autoConvert_v1alpha2_CloudConfiguration_To_kops_CloudConfiguration(in *Clou
 	out.Multizone = in.Multizone
 	out.NodeTags = in.NodeTags
 	out.NodeInstancePrefix = in.NodeInstancePrefix
+	out.GCEServiceAccount = in.GCEServiceAccount
 	out.DisableSecurityGroupIngress = in.DisableSecurityGroupIngress
 	out.ElbSecurityGroup = in.ElbSecurityGroup
 	out.VSphereUsername = in.VSphereUsername
@@ -1590,6 +1597,7 @@ func autoConvert_kops_CloudConfiguration_To_v1alpha2_CloudConfiguration(in *kops
 	out.Multizone = in.Multizone
 	out.NodeTags = in.NodeTags
 	out.NodeInstancePrefix = in.NodeInstancePrefix
+	out.GCEServiceAccount = in.GCEServiceAccount
 	out.DisableSecurityGroupIngress = in.DisableSecurityGroupIngress
 	out.ElbSecurityGroup = in.ElbSecurityGroup
 	out.VSphereUsername = in.VSphereUsername
@@ -2057,7 +2065,6 @@ func autoConvert_v1alpha2_ClusterSpec_To_kops_ClusterSpec(in *ClusterSpec, out *
 	} else {
 		out.RollingUpdate = nil
 	}
-	out.GCEServiceAccount = in.GCEServiceAccount
 	return nil
 }
 
@@ -2381,7 +2388,6 @@ func autoConvert_kops_ClusterSpec_To_v1alpha2_ClusterSpec(in *kops.ClusterSpec, 
 	} else {
 		out.RollingUpdate = nil
 	}
-	out.GCEServiceAccount = in.GCEServiceAccount
 	return nil
 }
 
@@ -2560,6 +2566,7 @@ func autoConvert_v1alpha2_DockerConfig_To_kops_DockerConfig(in *DockerConfig, ou
 	out.MetricsAddress = in.MetricsAddress
 	out.MTU = in.MTU
 	out.RegistryMirrors = in.RegistryMirrors
+	out.SelinuxEnabled = in.SelinuxEnabled
 	out.SkipInstall = in.SkipInstall
 	out.Storage = in.Storage
 	out.StorageOpts = in.StorageOpts
@@ -2595,6 +2602,7 @@ func autoConvert_kops_DockerConfig_To_v1alpha2_DockerConfig(in *kops.DockerConfi
 	out.MetricsAddress = in.MetricsAddress
 	out.MTU = in.MTU
 	out.RegistryMirrors = in.RegistryMirrors
+	out.SelinuxEnabled = in.SelinuxEnabled
 	out.SkipInstall = in.SkipInstall
 	out.Storage = in.Storage
 	out.StorageOpts = in.StorageOpts
@@ -3370,6 +3378,7 @@ func autoConvert_v1alpha2_InstanceGroupSpec_To_kops_InstanceGroupSpec(in *Instan
 	} else {
 		out.RollingUpdate = nil
 	}
+	out.InstanceInterruptionBehavior = in.InstanceInterruptionBehavior
 	return nil
 }
 
@@ -3508,6 +3517,7 @@ func autoConvert_kops_InstanceGroupSpec_To_v1alpha2_InstanceGroupSpec(in *kops.I
 	} else {
 		out.RollingUpdate = nil
 	}
+	out.InstanceInterruptionBehavior = in.InstanceInterruptionBehavior
 	return nil
 }
 
@@ -3783,6 +3793,7 @@ func autoConvert_v1alpha2_KubeAPIServerConfig_To_kops_KubeAPIServerConfig(in *Ku
 	out.ServiceAccountKeyFile = in.ServiceAccountKeyFile
 	out.ServiceAccountSigningKeyFile = in.ServiceAccountSigningKeyFile
 	out.ServiceAccountIssuer = in.ServiceAccountIssuer
+	out.ServiceAccountJWKSURI = in.ServiceAccountJWKSURI
 	out.APIAudiences = in.APIAudiences
 	out.CPURequest = in.CPURequest
 	out.EventTTL = in.EventTTL
@@ -3885,6 +3896,7 @@ func autoConvert_kops_KubeAPIServerConfig_To_v1alpha2_KubeAPIServerConfig(in *ko
 	out.ServiceAccountKeyFile = in.ServiceAccountKeyFile
 	out.ServiceAccountSigningKeyFile = in.ServiceAccountSigningKeyFile
 	out.ServiceAccountIssuer = in.ServiceAccountIssuer
+	out.ServiceAccountJWKSURI = in.ServiceAccountJWKSURI
 	out.APIAudiences = in.APIAudiences
 	out.CPURequest = in.CPURequest
 	out.EventTTL = in.EventTTL
@@ -3922,6 +3934,7 @@ func autoConvert_v1alpha2_KubeControllerManagerConfig_To_kops_KubeControllerMana
 		out.LeaderElection = nil
 	}
 	out.AttachDetachReconcileSyncPeriod = in.AttachDetachReconcileSyncPeriod
+	out.DisableAttachDetachReconcileSync = in.DisableAttachDetachReconcileSync
 	out.TerminatedPodGCThreshold = in.TerminatedPodGCThreshold
 	out.NodeMonitorPeriod = in.NodeMonitorPeriod
 	out.NodeMonitorGracePeriod = in.NodeMonitorGracePeriod
@@ -3981,6 +3994,7 @@ func autoConvert_kops_KubeControllerManagerConfig_To_v1alpha2_KubeControllerMana
 		out.LeaderElection = nil
 	}
 	out.AttachDetachReconcileSyncPeriod = in.AttachDetachReconcileSyncPeriod
+	out.DisableAttachDetachReconcileSync = in.DisableAttachDetachReconcileSync
 	out.TerminatedPodGCThreshold = in.TerminatedPodGCThreshold
 	out.NodeMonitorPeriod = in.NodeMonitorPeriod
 	out.NodeMonitorGracePeriod = in.NodeMonitorGracePeriod

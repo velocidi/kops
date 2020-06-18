@@ -21,7 +21,6 @@ import (
 	"sort"
 	"strings"
 
-	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/model"
 	"k8s.io/kops/upup/pkg/fi"
@@ -101,10 +100,6 @@ func (b *MasterVolumeBuilder) Build(c *fi.ModelBuilderContext) error {
 				b.addDOVolume(c, name, volumeSize, zone, etcd, m, allMembers)
 			case kops.CloudProviderGCE:
 				b.addGCEVolume(c, name, volumeSize, zone, etcd, m, allMembers)
-			case kops.CloudProviderVSphere:
-				b.addVSphereVolume(c, name, volumeSize, zone, etcd, m, allMembers)
-			case kops.CloudProviderBareMetal:
-				klog.Fatalf("BareMetal not implemented")
 			case kops.CloudProviderOpenstack:
 				err = b.addOpenstackVolume(c, name, volumeSize, zone, etcd, m, allMembers)
 				if err != nil {
@@ -248,10 +243,6 @@ func (b *MasterVolumeBuilder) addGCEVolume(c *fi.ModelBuilderContext, name strin
 	}
 
 	c.AddTask(t)
-}
-
-func (b *MasterVolumeBuilder) addVSphereVolume(c *fi.ModelBuilderContext, name string, volumeSize int32, zone string, etcd *kops.EtcdClusterSpec, m *kops.EtcdMemberSpec, allMembers []string) {
-	fmt.Print("addVSphereVolume to be implemented")
 }
 
 func (b *MasterVolumeBuilder) addOpenstackVolume(c *fi.ModelBuilderContext, name string, volumeSize int32, zone string, etcd *kops.EtcdClusterSpec, m *kops.EtcdMemberSpec, allMembers []string) error {

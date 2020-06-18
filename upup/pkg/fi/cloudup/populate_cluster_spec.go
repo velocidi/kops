@@ -94,7 +94,7 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 	// Copy cluster & instance groups, so we can modify them freely
 	cluster := &kopsapi.Cluster{}
 
-	reflectutils.JsonMergeStruct(cluster, c.InputCluster)
+	reflectutils.JSONMergeStruct(cluster, c.InputCluster)
 
 	err := c.assignSubnets(cluster)
 	if err != nil {
@@ -305,6 +305,7 @@ func (c *populateClusterSpec) run(clientset simple.Clientset) error {
 			codeModels = append(codeModels, &components.KubeControllerManagerOptionsBuilder{Context: optionsContext})
 			codeModels = append(codeModels, &components.KubeSchedulerOptionsBuilder{OptionsContext: optionsContext})
 			codeModels = append(codeModels, &components.KubeProxyOptionsBuilder{Context: optionsContext})
+			codeModels = append(codeModels, &components.CiliumOptionsBuilder{Context: optionsContext})
 		}
 	}
 

@@ -17,7 +17,6 @@ limitations under the License.
 package nodeup
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +29,7 @@ import (
 
 	"k8s.io/kops/nodeup/pkg/distros"
 	"k8s.io/kops/nodeup/pkg/model"
+	"k8s.io/kops/nodeup/pkg/model/networking"
 	api "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/registry"
 	"k8s.io/kops/pkg/apis/nodeup"
@@ -40,11 +40,10 @@ import (
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
 	"k8s.io/kops/upup/pkg/fi/secrets"
 	"k8s.io/kops/upup/pkg/fi/utils"
+	"k8s.io/kops/util/pkg/architectures"
 	"k8s.io/kops/util/pkg/vfs"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/ec2metadata"
-	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -167,29 +166,41 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 		return err
 	}
 
+	architecture, err := architectures.FindArchitecture()
+	if err != nil {
+		return fmt.Errorf("error determining OS architecture: %v", err)
+	}
+
+	archTags := architecture.BuildTags()
+
 	distribution, err := distros.FindDistribution(c.FSRoot)
 	if err != nil {
 		return fmt.Errorf("error determining OS distribution: %v", err)
 	}
 
-	osTags := distribution.BuildTags()
+	distroTags := distribution.BuildTags()
 
 	nodeTags := sets.NewString()
-	nodeTags.Insert(osTags...)
 	nodeTags.Insert(c.config.Tags...)
+	nodeTags.Insert(archTags...)
+	nodeTags.Insert(distroTags...)
 
 	klog.Infof("Config tags: %v", c.config.Tags)
-	klog.Infof("OS tags: %v", osTags)
+	klog.Infof("Arch tags: %v", archTags)
+	klog.Infof("Distro tags: %v", distroTags)
 
 	modelContext := &model.NodeupModelContext{
-		Architecture:  model.ArchitectureAmd64,
+		Architecture:  architecture,
 		Assets:        assetStore,
 		Cluster:       c.cluster,
+		ConfigBase:    configBase,
 		Distribution:  distribution,
 		InstanceGroup: c.instanceGroup,
 		NodeupConfig:  c.config,
 	}
 
+	var secretStore fi.SecretStore
+	var keyStore fi.Keystore
 	if c.cluster.Spec.SecretStore != "" {
 		klog.Infof("Building SecretStore at %q", c.cluster.Spec.SecretStore)
 		p, err := vfs.Context.BuildVfsPath(c.cluster.Spec.SecretStore)
@@ -197,7 +208,8 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 			return fmt.Errorf("error building secret store path: %v", err)
 		}
 
-		modelContext.SecretStore = secrets.NewVFSSecretStore(c.cluster, p)
+		secretStore = secrets.NewVFSSecretStore(c.cluster, p)
+		modelContext.SecretStore = secretStore
 	} else {
 		return fmt.Errorf("SecretStore not set")
 	}
@@ -209,7 +221,8 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 			return fmt.Errorf("error building key store path: %v", err)
 		}
 
-		modelContext.KeyStore = fi.NewVFSCAStore(c.cluster, p, false)
+		modelContext.KeyStore = fi.NewVFSCAStore(c.cluster, p)
+		keyStore = modelContext.KeyStore
 	} else {
 		return fmt.Errorf("KeyStore not set")
 	}
@@ -243,62 +256,22 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 	loader.Builders = append(loader.Builders, &model.PackagesBuilder{NodeupModelContext: modelContext})
 	loader.Builders = append(loader.Builders, &model.SecretBuilder{NodeupModelContext: modelContext})
 	loader.Builders = append(loader.Builders, &model.FirewallBuilder{NodeupModelContext: modelContext})
-	loader.Builders = append(loader.Builders, &model.NetworkBuilder{NodeupModelContext: modelContext})
 	loader.Builders = append(loader.Builders, &model.SysctlBuilder{NodeupModelContext: modelContext})
 	loader.Builders = append(loader.Builders, &model.KubeAPIServerBuilder{NodeupModelContext: modelContext})
 	loader.Builders = append(loader.Builders, &model.KubeControllerManagerBuilder{NodeupModelContext: modelContext})
 	loader.Builders = append(loader.Builders, &model.KubeSchedulerBuilder{NodeupModelContext: modelContext})
 	loader.Builders = append(loader.Builders, &model.EtcdManagerTLSBuilder{NodeupModelContext: modelContext})
+	loader.Builders = append(loader.Builders, &model.KubeProxyBuilder{NodeupModelContext: modelContext})
 
-	if c.cluster.Spec.Networking.Cilium != nil {
-		loader.Builders = append(loader.Builders, &model.CiliumBuilder{NodeupModelContext: modelContext})
-	}
-	if c.cluster.Spec.Networking.Kuberouter == nil {
-		loader.Builders = append(loader.Builders, &model.KubeProxyBuilder{NodeupModelContext: modelContext})
-	} else {
-		loader.Builders = append(loader.Builders, &model.KubeRouterBuilder{NodeupModelContext: modelContext})
-	}
-	if c.cluster.Spec.Networking.Calico != nil {
-		loader.Builders = append(loader.Builders, &model.EtcdTLSBuilder{NodeupModelContext: modelContext})
-	}
+	loader.Builders = append(loader.Builders, &networking.CommonBuilder{NodeupModelContext: modelContext})
+	loader.Builders = append(loader.Builders, &networking.CalicoBuilder{NodeupModelContext: modelContext})
+	loader.Builders = append(loader.Builders, &networking.CanalBuilder{NodeupModelContext: modelContext})
+	loader.Builders = append(loader.Builders, &networking.CiliumBuilder{NodeupModelContext: modelContext})
+	loader.Builders = append(loader.Builders, &networking.FlannelBuilder{NodeupModelContext: modelContext})
+	loader.Builders = append(loader.Builders, &networking.KuberouterBuilder{NodeupModelContext: modelContext})
+	loader.Builders = append(loader.Builders, &networking.LyftVPCBuilder{NodeupModelContext: modelContext})
 
-	if c.cluster.Spec.Networking.LyftVPC != nil {
-
-		loader.TemplateFunctions["SubnetTags"] = func() (string, error) {
-			var tags map[string]string
-			if c.cluster.IsKubernetesGTE("1.18") {
-				tags = map[string]string{
-					"KubernetesCluster": c.cluster.Name,
-				}
-			} else {
-				tags = map[string]string{
-					"Type": "pod",
-				}
-			}
-			if len(c.cluster.Spec.Networking.LyftVPC.SubnetTags) > 0 {
-				tags = c.cluster.Spec.Networking.LyftVPC.SubnetTags
-			}
-
-			bytes, err := json.Marshal(tags)
-			if err != nil {
-				return "", err
-			}
-			return string(bytes), nil
-		}
-
-		loader.TemplateFunctions["NodeSecurityGroups"] = func() (string, error) {
-			// use the same security groups as the node
-			ids, err := evaluateSecurityGroups(c.cluster.Spec.NetworkID)
-			if err != nil {
-				return "", err
-			}
-			bytes, err := json.Marshal(ids)
-			if err != nil {
-				return "", err
-			}
-			return string(bytes), nil
-		}
-	}
+	networking.LoadLyftTemplateFunctions(loader.TemplateFunctions, c.cluster)
 
 	taskMap, err := loader.Build(c.ModelDir)
 	if err != nil {
@@ -315,8 +288,6 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 	// Protokube load image task is in ProtokubeBuilder
 
 	var cloud fi.Cloud
-	var keyStore fi.Keystore
-	var secretStore fi.SecretStore
 	var target fi.Target
 	checkExisting := true
 
@@ -392,57 +363,6 @@ func evaluateSpec(c *api.Cluster) error {
 	return nil
 }
 
-func evaluateSecurityGroups(vpcId string) ([]string, error) {
-	config := aws.NewConfig()
-	config = config.WithCredentialsChainVerboseErrors(true)
-
-	s, err := session.NewSession(config)
-	if err != nil {
-		return nil, fmt.Errorf("error starting new AWS session: %v", err)
-	}
-	s.Handlers.Send.PushFront(func(r *request.Request) {
-		// Log requests
-		klog.V(4).Infof("AWS API Request: %s/%s", r.ClientInfo.ServiceName, r.Operation.Name)
-	})
-
-	metadata := ec2metadata.New(s, config)
-
-	region, err := metadata.Region()
-	if err != nil {
-		return nil, fmt.Errorf("error querying ec2 metadata service (for az/region): %v", err)
-	}
-
-	sgNames, err := metadata.GetMetadata("security-groups")
-	if err != nil {
-		return nil, fmt.Errorf("error querying ec2 metadata service (for security-groups): %v", err)
-	}
-	svc := ec2.New(s, config.WithRegion(region))
-
-	result, err := svc.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
-		Filters: []*ec2.Filter{
-			{
-				Name:   aws.String("group-name"),
-				Values: aws.StringSlice(strings.Fields(sgNames)),
-			},
-			{
-				Name:   aws.String("vpc-id"),
-				Values: []*string{aws.String(vpcId)},
-			},
-		},
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("error looking up instance security group ids: %v", err)
-	}
-	var sgIds []string
-	for _, group := range result.SecurityGroups {
-		sgIds = append(sgIds, *group.GroupId)
-	}
-
-	return sgIds, nil
-
-}
-
 func evaluateHostnameOverride(hostnameOverride string) (string, error) {
 	if hostnameOverride == "" || hostnameOverride == "@hostname" {
 		return "", nil
@@ -488,6 +408,21 @@ func evaluateHostnameOverride(hostnameOverride string) (string, error) {
 			return "", fmt.Errorf("Too many instances returned for the single instance-id")
 		}
 		return *(result.Reservations[0].Instances[0].PrivateDnsName), nil
+	}
+
+	if k == "@gce" {
+		// We recognize @gce as meaning the hostname from the GCE metadata service
+		// This lets us tolerate broken hostnames (i.e. systemd)
+		b, err := vfs.Context.ReadFile("metadata://gce/instance/hostname")
+		if err != nil {
+			return "", fmt.Errorf("error reading hostname from GCE metadata: %v", err)
+		}
+
+		// We only want to use the first portion of the fully-qualified name
+		// e.g. foo.c.project.internal => foo
+		fullyQualified := string(b)
+		bareHostname := strings.Split(fullyQualified, ".")[0]
+		return bareHostname, nil
 	}
 
 	if k == "@digitalocean" {

@@ -52,13 +52,7 @@ func (b *ServerGroupModelBuilder) buildInstances(c *fi.ModelBuilderContext, sg *
 
 	var igUserData *string
 	igMeta := make(map[string]string)
-	cloudTags, err := b.KopsModelContext.CloudTagsForInstanceGroup(ig)
-	if err != nil {
-		return fmt.Errorf("could not get cloud tags for instance group %s: %v", ig.Name, err)
-	}
-	for label, labelVal := range cloudTags {
-		igMeta[label] = labelVal
-	}
+
 	if ig.Spec.Role != kops.InstanceGroupRoleBastion {
 		// Bastion does not belong to the cluster and will not be running protokube.
 
@@ -116,7 +110,7 @@ func (b *ServerGroupModelBuilder) buildInstances(c *fi.ModelBuilderContext, sg *
 		var subnets []*openstacktasks.Subnet
 		if len(ig.Spec.Subnets) > 0 {
 			subnet := ig.Spec.Subnets[int(i)%len(ig.Spec.Subnets)]
-			// bastion subnet name is not actual zone name, it contains "utility-" prefix
+			// bastion subnet name might contain a "utility-" prefix
 			if ig.Spec.Role == kops.InstanceGroupRoleBastion {
 				az = fi.String(strings.Replace(subnet, "utility-", "", 1))
 			} else {

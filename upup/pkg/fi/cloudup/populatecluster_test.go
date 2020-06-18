@@ -109,7 +109,7 @@ func mockedPopulateClusterSpec(c *kopsapi.Cluster) (*kopsapi.Cluster, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error building vfspath: %v", err)
 	}
-	clientset := vfsclientset.NewVFSClientset(basePath, true)
+	clientset := vfsclientset.NewVFSClientset(basePath)
 	return PopulateClusterSpec(clientset, c, assetBuilder)
 }
 
@@ -453,7 +453,7 @@ func TestPopulateCluster_DockerVersion(t *testing.T) {
 		},
 		{
 			KubernetesVersion: "1.17.0",
-			DockerVersion:     "19.03.4",
+			DockerVersion:     "19.03.11",
 		},
 	}
 

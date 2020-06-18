@@ -61,6 +61,7 @@ func ListResourcesAWS(cloud awsup.AWSCloud, clusterName string) (map[string]*res
 		//ListCloudFormationStacks,
 
 		// EC2
+		ListAutoScalingGroups,
 		ListInstances,
 		ListKeypairs,
 		ListSecurityGroups,
@@ -81,14 +82,12 @@ func ListResourcesAWS(cloud awsup.AWSCloud, clusterName string) (map[string]*res
 		// IAM
 		ListIAMInstanceProfiles,
 		ListIAMRoles,
+		ListIAMOIDCProviders,
 	}
 
 	if featureflag.Spotinst.Enabled() {
 		// Spotinst resources
 		listFunctions = append(listFunctions, ListSpotinstResources)
-	} else {
-		// AutoScaling Groups
-		listFunctions = append(listFunctions, ListAutoScalingGroups)
 	}
 
 	for _, fn := range listFunctions {
@@ -1317,13 +1316,16 @@ func FindNatGateways(cloud fi.Cloud, routeTables map[string]*resources.Resource,
 	}
 
 	var resourceTrackers []*resources.Resource
-	if len(natGatewayIds) != 0 {
-		request := &ec2.DescribeNatGatewaysInput{}
-		for natGatewayId := range natGatewayIds {
-			request.NatGatewayIds = append(request.NatGatewayIds, aws.String(natGatewayId))
+	for natGatewayId := range natGatewayIds {
+		request := &ec2.DescribeNatGatewaysInput{
+			NatGatewayIds: []*string{aws.String(natGatewayId)},
 		}
 		response, err := c.EC2().DescribeNatGateways(request)
 		if err != nil {
+			if awsup.AWSErrorCode(err) == "NatGatewayNotFound" {
+				klog.V(2).Infof("Got NatGatewayNotFound describing NatGateway %s; will treat as already-deleted", natGatewayId)
+				continue
+			}
 			return nil, fmt.Errorf("error from DescribeNatGateways: %v", err)
 		}
 
@@ -2099,6 +2101,73 @@ func ListIAMInstanceProfiles(cloud fi.Cloud, clusterName string) ([]*resources.R
 	}
 
 	return resourceTrackers, nil
+}
+
+func ListIAMOIDCProviders(cloud fi.Cloud, clusterName string) ([]*resources.Resource, error) {
+	c := cloud.(awsup.AWSCloud)
+
+	var providers []*string
+	{
+		request := &iam.ListOpenIDConnectProvidersInput{}
+		response, err := c.IAM().ListOpenIDConnectProviders(request)
+		if err != nil {
+			return nil, fmt.Errorf("error listing IAM OIDC Providers: %v", err)
+		}
+		for _, provider := range response.OpenIDConnectProviderList {
+			arn := provider.Arn
+			descReq := &iam.GetOpenIDConnectProviderInput{
+				OpenIDConnectProviderArn: arn,
+			}
+			_, err := c.IAM().GetOpenIDConnectProvider(descReq)
+			if err != nil {
+				return nil, fmt.Errorf("error getting IAM OIDC Provider: %v", err)
+			}
+			// TODO: only delete oidc providers if they're owned by the cluster.
+			// We need to figure out how we can determine that given only a cluster name.
+			// Providers dont support tagging or naming.
+
+			// providers = append(providers, arn)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error listing IAM roles: %v", err)
+		}
+	}
+
+	var resourceTrackers []*resources.Resource
+
+	for _, arn := range providers {
+		resourceTracker := &resources.Resource{
+			Name:    aws.StringValue(arn),
+			ID:      aws.StringValue(arn),
+			Type:    "oidc-provider",
+			Deleter: DeleteIAMOIDCProvider,
+		}
+		resourceTrackers = append(resourceTrackers, resourceTracker)
+	}
+
+	return resourceTrackers, nil
+}
+
+func DeleteIAMOIDCProvider(cloud fi.Cloud, r *resources.Resource) error {
+	c := cloud.(awsup.AWSCloud)
+	arn := r.Obj.(*string)
+	{
+		klog.V(2).Infof("Deleting IAM OIDC Provider %v", arn)
+		request := &iam.DeleteOpenIDConnectProviderInput{
+			OpenIDConnectProviderArn: arn,
+		}
+		_, err := c.IAM().DeleteOpenIDConnectProvider(request)
+		if err != nil {
+			if awsup.AWSErrorCode(err) == "NoSuchEntity" {
+				klog.V(2).Infof("Got NoSuchEntity deleting IAM OIDC Provider %v; will treat as already-deleted", arn)
+				return nil
+			}
+
+			return fmt.Errorf("error deleting IAM OIDC Provider %v: %v", arn, err)
+		}
+	}
+
+	return nil
 }
 
 func ListSpotinstResources(cloud fi.Cloud, clusterName string) ([]*resources.Resource, error) {

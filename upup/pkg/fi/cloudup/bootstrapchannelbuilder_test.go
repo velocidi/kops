@@ -83,7 +83,7 @@ func runChannelBuilderTest(t *testing.T, key string, addonManifests []string) {
 	if err != nil {
 		t.Errorf("error building vfspath: %v", err)
 	}
-	clientset := vfsclientset.NewVFSClientset(basePath, true)
+	clientset := vfsclientset.NewVFSClientset(basePath)
 
 	secretStore, err := clientset.SecretStore(cluster)
 	if err != nil {
@@ -100,7 +100,9 @@ func runChannelBuilderTest(t *testing.T, key string, addonManifests []string) {
 	tf.AddTo(templates.TemplateFunctions, secretStore)
 
 	bcb := BootstrapChannelBuilder{
-		cluster:      cluster,
+		KopsModelContext: &model.KopsModelContext{
+			Cluster: cluster,
+		},
 		templates:    templates,
 		assetBuilder: assets.NewAssetBuilder(cluster, ""),
 	}

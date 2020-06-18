@@ -29,6 +29,7 @@ import (
 	"k8s.io/kops/pkg/assets"
 	"k8s.io/kops/pkg/dns"
 	"k8s.io/kops/pkg/flagbuilder"
+	"k8s.io/kops/pkg/rbac"
 	"k8s.io/kops/pkg/systemd"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
@@ -65,14 +66,15 @@ func (t *ProtokubeBuilder) Build(c *fi.ModelBuilderContext) error {
 	}
 
 	if t.IsMaster {
-		kubeconfig, err := t.BuildPKIKubeconfig("kops")
-		if err != nil {
-			return err
+		name := nodetasks.PKIXName{
+			CommonName:   "kops",
+			Organization: []string{rbac.SystemPrivilegedGroup},
 		}
+		kubeconfig := t.BuildIssuedKubeconfig("kops", name, c)
 
 		c.AddTask(&nodetasks.File{
 			Path:     "/var/lib/kops/kubeconfig",
-			Contents: fi.NewStringResource(kubeconfig),
+			Contents: kubeconfig,
 			Type:     nodetasks.FileType_File,
 			Mode:     s("0400"),
 		})
@@ -193,7 +195,7 @@ func (t *ProtokubeBuilder) ProtokubeImagePullCommand() (string, error) {
 	if t.Cluster.Spec.ContainerRuntime == "docker" {
 		protokubeImagePullCommand = "-/usr/bin/docker pull " + sources[0]
 	} else if t.Cluster.Spec.ContainerRuntime == "containerd" {
-		protokubeImagePullCommand = "-/usr/bin/ctr images pull docker.io/" + sources[0]
+		protokubeImagePullCommand = "-/usr/bin/ctr --namespace k8s.io images pull docker.io/" + sources[0]
 	} else {
 		return "", fmt.Errorf("unable to create protokube image pull command for unsupported runtime %q", t.Cluster.Spec.ContainerRuntime)
 	}
@@ -219,7 +221,7 @@ func (t *ProtokubeBuilder) ProtokubeContainerRemoveCommand() (string, error) {
 	if t.Cluster.Spec.ContainerRuntime == "docker" {
 		containerRemoveCommand = "-/usr/bin/docker rm protokube"
 	} else if t.Cluster.Spec.ContainerRuntime == "containerd" {
-		containerRemoveCommand = "-/usr/bin/ctr container rm protokube"
+		containerRemoveCommand = "-/usr/bin/ctr --namespace k8s.io container rm protokube"
 	} else {
 		return "", fmt.Errorf("unable to create protokube remove command for unsupported runtime %q", t.Cluster.Spec.ContainerRuntime)
 	}
@@ -272,7 +274,7 @@ func (t *ProtokubeBuilder) ProtokubeContainerRunCommand() (string, error) {
 
 	} else if t.Cluster.Spec.ContainerRuntime == "containerd" {
 		containerRunArgs = append(containerRunArgs, []string{
-			"/usr/bin/ctr run",
+			"/usr/bin/ctr --namespace k8s.io run",
 			"--net-host",
 			"--with-ns pid:/proc/1/ns/pid",
 			"--privileged",
@@ -316,11 +318,9 @@ func (t *ProtokubeBuilder) ProtokubeContainerRunCommand() (string, error) {
 
 // ProtokubeFlags are the flags for protokube
 type ProtokubeFlags struct {
-	ApplyTaints *bool    `json:"applyTaints,omitempty" flag:"apply-taints"`
-	Channels    []string `json:"channels,omitempty" flag:"channels"`
-	Cloud       *string  `json:"cloud,omitempty" flag:"cloud"`
-	// ClusterID flag is required only for vSphere cloud type, to pass cluster id information to protokube. AWS and GCE workflows ignore this flag.
-	ClusterID                 *string  `json:"cluster-id,omitempty" flag:"cluster-id"`
+	ApplyTaints               *bool    `json:"applyTaints,omitempty" flag:"apply-taints"`
+	Channels                  []string `json:"channels,omitempty" flag:"channels"`
+	Cloud                     *string  `json:"cloud,omitempty" flag:"cloud"`
 	Containerized             *bool    `json:"containerized,omitempty" flag:"containerized"`
 	DNSInternalSuffix         *string  `json:"dnsInternalSuffix,omitempty" flag:"dns-internal-suffix"`
 	DNSProvider               *string  `json:"dnsProvider,omitempty" flag:"dns"`
@@ -361,7 +361,7 @@ type ProtokubeFlags struct {
 	GossipListen   *string `json:"gossip-listen" flag:"gossip-listen"`
 	GossipSecret   *string `json:"gossip-secret" flag:"gossip-secret"`
 
-	GossipProtocolSecondary *string `json:"gossip-protocol-secondary" flag:"gossip-protocol-secondary"`
+	GossipProtocolSecondary *string `json:"gossip-protocol-secondary" flag:"gossip-protocol-secondary" flag-include-empty:"true"`
 	GossipListenSecondary   *string `json:"gossip-listen-secondary" flag:"gossip-listen-secondary"`
 	GossipSecretSecondary   *string `json:"gossip-secret-secondary" flag:"gossip-secret-secondary"`
 }
@@ -495,10 +495,6 @@ func (t *ProtokubeBuilder) ProtokubeFlags(k8sVersion semver.Version) (*Protokube
 				f.DNSProvider = fi.String("digitalocean")
 			case kops.CloudProviderGCE:
 				f.DNSProvider = fi.String("google-clouddns")
-			case kops.CloudProviderVSphere:
-				f.DNSProvider = fi.String("coredns")
-				f.ClusterID = fi.String(t.Cluster.ObjectMeta.Name)
-				f.DNSServer = fi.String(*t.Cluster.Spec.CloudConfig.VSphereCoreDNSServer)
 			default:
 				klog.Warningf("Unknown cloudprovider %q; won't set DNS provider", t.Cluster.Spec.CloudProvider)
 			}

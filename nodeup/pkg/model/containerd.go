@@ -25,9 +25,11 @@ import (
 	"k8s.io/kops/nodeup/pkg/model/resources"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/flagbuilder"
+	"k8s.io/kops/pkg/model/components"
 	"k8s.io/kops/pkg/systemd"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
+	"k8s.io/kops/util/pkg/architectures"
 )
 
 // ContainerdBuilder install containerd (just the packages at the moment)
@@ -43,130 +45,37 @@ var containerdVersions = []packageVersion{
 		PackageVersion: "1.2.4",
 		Name:           "containerd.io",
 		Distros:        []distros.Distribution{distros.DistributionDebian9},
-		Architectures:  []Architecture{ArchitectureAmd64},
+		Architectures:  []architectures.Architecture{architectures.ArchitectureAmd64},
 		Version:        "1.2.4-1",
 		Source:         "https://download.docker.com/linux/debian/dists/stretch/pool/stable/amd64/containerd.io_1.2.4-1_amd64.deb",
-		Hash:           "48c6ab0c908316af9a183de5aad64703bc516bdf",
+		Hash:           "5d4eeec093bc6f0b35921b88c3939b480acc619c790f4eab001a66efb957e6c1",
 	},
 
-	// 1.2.10 - Debian Stretch
+	// 1.2.10 - Linux Generic
 	{
 		PackageVersion: "1.2.10",
-		Name:           "containerd.io",
-		Distros:        []distros.Distribution{distros.DistributionDebian9},
-		Architectures:  []Architecture{ArchitectureAmd64},
-		Version:        "1.2.10-3",
-		Source:         "https://download.docker.com/linux/debian/dists/stretch/pool/stable/amd64/containerd.io_1.2.10-3_amd64.deb",
-		Hash:           "186f2f2c570f37b363102e6b879073db6dec671d",
-	},
-
-	// 1.2.10 - Debian Buster
-	{
-		PackageVersion: "1.2.10",
-		Name:           "containerd.io",
-		Distros:        []distros.Distribution{distros.DistributionDebian10},
-		Architectures:  []Architecture{ArchitectureAmd64},
-		Version:        "1.2.10-3",
-		Source:         "https://download.docker.com/linux/debian/dists/buster/pool/stable/amd64/containerd.io_1.2.10-3_amd64.deb",
-		Hash:           "365e4a7541ce2cf3c3036ea2a9bf6b40a50893a8",
-	},
-
-	// 1.2.10 - Ubuntu Xenial
-	{
-		PackageVersion: "1.2.10",
-		Name:           "containerd.io",
-		Distros:        []distros.Distribution{distros.DistributionXenial},
-		Architectures:  []Architecture{ArchitectureAmd64},
-		Version:        "1.2.10-3",
-		Source:         "https://download.docker.com/linux/ubuntu/dists/xenial/pool/stable/amd64/containerd.io_1.2.10-3_amd64.deb",
-		Hash:           "b64e7170d9176bc38967b2e12147c69b65bdd0fc",
-	},
-
-	// 1.2.10 - Ubuntu Bionic
-	{
-		PackageVersion: "1.2.10",
-		Name:           "containerd.io",
-		Distros:        []distros.Distribution{distros.DistributionBionic},
-		Architectures:  []Architecture{ArchitectureAmd64},
-		Version:        "1.2.10-3",
-		Source:         "https://download.docker.com/linux/ubuntu/dists/bionic/pool/stable/amd64/containerd.io_1.2.10-3_amd64.deb",
-		Hash:           "f4c941807310e3fa470dddfb068d599174a3daec",
-	},
-
-	// 1.2.10 - CentOS / Rhel 7
-	{
-		PackageVersion: "1.2.10",
-		Name:           "containerd.io",
-		Distros:        []distros.Distribution{distros.DistributionRhel7, distros.DistributionCentos7, distros.DistributionAmazonLinux2},
-		Architectures:  []Architecture{ArchitectureAmd64},
-		Version:        "1.2.10",
-		Source:         "https://download.docker.com/linux/centos/7/x86_64/stable/Packages/containerd.io-1.2.10-3.2.el7.x86_64.rpm",
-		Hash:           "f6447e84479df3a58ce04a3da87ccc384663493b",
-	},
-
-	// 1.2.10 - CentOS / Rhel 8
-	{
-		PackageVersion: "1.2.10",
-		Name:           "containerd.io",
-		Distros:        []distros.Distribution{distros.DistributionRhel8, distros.DistributionCentos8},
-		Architectures:  []Architecture{ArchitectureAmd64},
-		Version:        "1.2.10",
-		Source:         "https://download.docker.com/linux/centos/7/x86_64/stable/Packages/containerd.io-1.2.10-3.2.el7.x86_64.rpm",
-		Hash:           "f6447e84479df3a58ce04a3da87ccc384663493b",
-	},
-
-	// 1.2.11 - Linux Generic
-	{
-		PackageVersion: "1.2.11",
 		PlainBinary:    true,
-		Architectures:  []Architecture{ArchitectureAmd64},
-		Source:         "https://storage.googleapis.com/cri-containerd-release/cri-containerd-1.2.11.linux-amd64.tar.gz",
-		Hash:           "c98c9fdfd0984557e5b1a1f209213d2d8ad8471c",
-	},
-
-	// 1.2.12 - Linux Generic
-	{
-		PackageVersion: "1.2.12",
-		PlainBinary:    true,
-		Architectures:  []Architecture{ArchitectureAmd64},
-		Source:         "https://storage.googleapis.com/cri-containerd-release/cri-containerd-1.2.12.linux-amd64.tar.gz",
-		Hash:           "9455ca2508ad57438cb02a986ba763033bcb05f7",
+		Architectures:  []architectures.Architecture{architectures.ArchitectureAmd64},
+		Source:         "https://storage.googleapis.com/cri-containerd-release/cri-containerd-1.2.10.linux-amd64.tar.gz",
+		Hash:           "9125a6ae5a89dfe9403fea7d03a8d8ba9fa97b6863ee8698c4e6c258fb14f1fd",
 	},
 
 	// 1.2.13 - Linux Generic
 	{
 		PackageVersion: "1.2.13",
 		PlainBinary:    true,
-		Architectures:  []Architecture{ArchitectureAmd64},
+		Architectures:  []architectures.Architecture{architectures.ArchitectureAmd64},
 		Source:         "https://storage.googleapis.com/cri-containerd-release/cri-containerd-1.2.13.linux-amd64.tar.gz",
-		Hash:           "70ee2821e26116b0cddc679d14806fd20d25d65c",
-	},
-
-	// 1.3.2 - Linux Generic
-	{
-		PackageVersion: "1.3.2",
-		PlainBinary:    true,
-		Architectures:  []Architecture{ArchitectureAmd64},
-		Source:         "https://storage.googleapis.com/cri-containerd-release/cri-containerd-1.3.2.linux-amd64.tar.gz",
-		Hash:           "f451d46280104588f236bee277bca1da8babc0e8",
-	},
-
-	// 1.3.3 - Linux Generic
-	{
-		PackageVersion: "1.3.3",
-		PlainBinary:    true,
-		Architectures:  []Architecture{ArchitectureAmd64},
-		Source:         "https://storage.googleapis.com/cri-containerd-release/cri-containerd-1.3.3.linux-amd64.tar.gz",
-		Hash:           "921b74e84da366ec3eaa72ff97fa8d6ae56834c6",
+		Hash:           "92d6ae6c60f6b068652b31811ce23d650ec0f6cc1e618ec9ae23db9321956258",
 	},
 
 	// 1.3.4 - Linux Generic
 	{
 		PackageVersion: "1.3.4",
 		PlainBinary:    true,
-		Architectures:  []Architecture{ArchitectureAmd64},
+		Architectures:  []architectures.Architecture{architectures.ArchitectureAmd64},
 		Source:         "https://storage.googleapis.com/cri-containerd-release/cri-containerd-1.3.4.linux-amd64.tar.gz",
-		Hash:           "ce518d8091ffdd40caa7f386c742d9b1d03e01b5",
+		Hash:           "4616971c3ad21c24f2f2320fa1c085577a91032a068dd56a41c7c4b71a458087",
 	},
 
 	// TIP: When adding the next version, copy the previous version, string replace the version and run:
@@ -192,15 +101,8 @@ func (b *ContainerdBuilder) Build(c *fi.ModelBuilderContext) error {
 		return nil
 	}
 
-	// @check: neither coreos or containeros need provision containerd.service, just the containerd daemon options
+	// @check: neither flatcar nor containeros need provision containerd.service, just the containerd daemon options
 	switch b.Distribution {
-	case distros.DistributionCoreOS:
-		klog.Infof("Detected CoreOS; won't install containerd")
-		if err := b.buildContainerOSConfigurationDropIn(c); err != nil {
-			return err
-		}
-		return nil
-
 	case distros.DistributionFlatcar:
 		klog.Infof("Detected Flatcar; won't install containerd")
 		if err := b.buildContainerOSConfigurationDropIn(c); err != nil {
@@ -322,6 +224,14 @@ func (b *ContainerdBuilder) Build(c *fi.ModelBuilderContext) error {
 		return err
 	}
 
+	// Using containerd with Kubenet requires special configuration. This is a temporary backwards-compatible solution
+	// and will be deprecated when Kubenet is deprecated:
+	// https://github.com/containerd/cri/blob/master/docs/config.md#cni-config-template
+	usesKubenet := components.UsesKubenet(b.Cluster.Spec.Networking)
+	if b.Cluster.Spec.ContainerRuntime == "containerd" && usesKubenet {
+		b.buildKubenetCNIConfigTemplate(c)
+	}
+
 	return nil
 }
 
@@ -376,7 +286,6 @@ func (b *ContainerdBuilder) buildContainerOSConfigurationDropIn(c *fi.ModelBuild
 		"EnvironmentFile=/etc/environment",
 		"TasksMax=infinity",
 	}
-
 	contents := strings.Join(lines, "\n")
 
 	c.AddTask(&nodetasks.File{
@@ -426,6 +335,40 @@ func (b *ContainerdBuilder) buildSysconfig(c *fi.ModelBuilderContext) error {
 	})
 
 	return nil
+}
+
+// buildKubenetCNIConfigTemplate is responsible for creating a special template for setups using Kubenet
+func (b *ContainerdBuilder) buildKubenetCNIConfigTemplate(c *fi.ModelBuilderContext) {
+	lines := []string{
+		"{",
+		"    \"cniVersion\": \"0.3.1\",",
+		"    \"name\": \"kubenet\",",
+		"    \"plugins\": [",
+		"        {",
+		"            \"type\": \"bridge\",",
+		"            \"bridge\": \"cbr0\",",
+		"            \"mtu\": 1460,",
+		"            \"addIf\": \"eth0\",",
+		"            \"isGateway\": true,",
+		"            \"ipMasq\": true,",
+		"            \"promiscMode\": true,",
+		"            \"ipam\": {",
+		"                \"type\": \"host-local\",",
+		"                \"subnet\": \"{{.PodCIDR}}\",",
+		"                \"routes\": [{ \"dst\": \"0.0.0.0/0\" }]",
+		"            }",
+		"        }",
+		"    ]",
+		"}",
+	}
+	contents := strings.Join(lines, "\n")
+	klog.V(8).Infof("Built kubenet CNI config file\n%s", contents)
+
+	c.AddTask(&nodetasks.File{
+		Path:     "/etc/containerd/cni-config.template",
+		Contents: fi.NewStringResource(contents),
+		Type:     nodetasks.FileType_File,
+	})
 }
 
 // skipInstall determines if kops should skip the installation and configuration of containerd

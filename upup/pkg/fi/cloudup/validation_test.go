@@ -21,7 +21,6 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog"
 	api "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/validation"
@@ -39,23 +38,20 @@ func buildDefaultCluster(t *testing.T) *api.Cluster {
 	}
 
 	if len(c.Spec.EtcdClusters) == 0 {
-		zones := sets.NewString()
-		for _, z := range c.Spec.Subnets {
-			zones.Insert(z.Zone)
-		}
-		etcdZones := zones.List()
 
 		for _, etcdCluster := range EtcdClusters {
+
 			etcd := &api.EtcdClusterSpec{}
 			etcd.Name = etcdCluster
-			for _, zone := range etcdZones {
+			for _, subnet := range c.Spec.Subnets {
 				m := &api.EtcdMemberSpec{}
-				m.Name = zone
-				m.InstanceGroup = fi.String(zone)
+				m.Name = subnet.Zone
+				m.InstanceGroup = fi.String("master-" + subnet.Name)
 				etcd.Members = append(etcd.Members, m)
 			}
 			c.Spec.EtcdClusters = append(c.Spec.EtcdClusters, etcd)
 		}
+
 	}
 
 	fullSpec, err := mockedPopulateClusterSpec(c)
@@ -143,16 +139,6 @@ func TestValidateFull_UpdatePolicy_Invalid(t *testing.T) {
 	expectErrorFromValidate(t, c, "spec.updatePolicy")
 }
 
-func Test_Validate_No_Classic_With_14(t *testing.T) {
-	c := buildDefaultCluster(t)
-	c.Spec.KubernetesVersion = "1.4.1"
-	c.Spec.Networking = &api.NetworkingSpec{
-		Classic: &api.ClassicNetworkingSpec{},
-	}
-
-	expectErrorFromValidate(t, c, "spec.networking")
-}
-
 func Test_Validate_Kubenet_With_14(t *testing.T) {
 	c := buildDefaultCluster(t)
 	c.Spec.KubernetesVersion = "1.4.1"
@@ -188,7 +174,7 @@ func TestValidate_ContainerRegistry_and_ContainerProxy_exclusivity(t *testing.T)
 
 	proxy := "https://proxy.example.com/"
 	c.Spec.Assets.ContainerProxy = &proxy
-	expectErrorFromValidate(t, c, "ContainerProxy cannot be used in conjunction with ContainerRegistry")
+	expectErrorFromValidate(t, c, "containerProxy cannot be used in conjunction with containerRegistry")
 
 	c.Spec.Assets.ContainerRegistry = nil
 	expectNoErrorFromValidate(t, c)

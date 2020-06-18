@@ -245,9 +245,9 @@ func RunUpdateCluster(ctx context.Context, f *util.Factory, clusterName string, 
 		for i := range list.Items {
 			instanceGroups = append(instanceGroups, &list.Items[i])
 
-			// Try to guess the path for additional third party volume plugins in CoreOS and Flatcar
+			// Try to guess the path for additional third party volume plugins in Flatcar
 			image := strings.ToLower(list.Items[i].Spec.Image)
-			if strings.Contains(image, "coreos") || strings.Contains(image, "flatcar") {
+			if strings.Contains(image, "flatcar") {
 				if cluster.Spec.Kubelet == nil {
 					cluster.Spec.Kubelet = &kops.KubeletConfigSpec{}
 				}
@@ -358,19 +358,19 @@ func RunUpdateCluster(ctx context.Context, f *util.Factory, clusterName string, 
 		// More suggestions on first run
 		if firstRun {
 			fmt.Fprintf(sb, "Suggestions:\n")
-			fmt.Fprintf(sb, " * validate cluster: kops validate cluster\n")
+			fmt.Fprintf(sb, " * validate cluster: kops validate cluster --wait 10m\n")
 			fmt.Fprintf(sb, " * list nodes: kubectl get nodes --show-labels\n")
 			if !usesBastion(instanceGroups) {
-				fmt.Fprintf(sb, " * ssh to the master: ssh -i ~/.ssh/id_rsa admin@%s\n", cluster.Spec.MasterPublicName)
+				fmt.Fprintf(sb, " * ssh to the master: ssh -i ~/.ssh/id_rsa ubuntu@%s\n", cluster.Spec.MasterPublicName)
 			} else {
 				bastionPublicName := findBastionPublicName(cluster)
 				if bastionPublicName != "" {
-					fmt.Fprintf(sb, " * ssh to the bastion: ssh -A -i ~/.ssh/id_rsa admin@%s\n", bastionPublicName)
+					fmt.Fprintf(sb, " * ssh to the bastion: ssh -A -i ~/.ssh/id_rsa ubuntu@%s\n", bastionPublicName)
 				} else {
 					fmt.Fprintf(sb, " * to ssh to the bastion, you probably want to configure a bastionPublicName.\n")
 				}
 			}
-			fmt.Fprintf(sb, " * the admin user is specific to Debian. If not using Debian please use the appropriate user based on your OS.\n")
+			fmt.Fprintf(sb, " * the ubuntu user is specific to Ubuntu. If not using Ubuntu please use the appropriate user based on your OS.\n")
 			fmt.Fprintf(sb, " * read about installing addons at: https://kops.sigs.k8s.io/operations/addons.\n")
 			fmt.Fprintf(sb, "\n")
 		}

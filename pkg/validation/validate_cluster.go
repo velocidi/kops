@@ -166,13 +166,13 @@ func (v *clusterValidatorImpl) Validate() (*ValidationCluster, error) {
 	if err != nil {
 		return nil, err
 	}
-	validation.validateNodes(cloudGroups)
+	readyNodes := validation.validateNodes(cloudGroups, v.instanceGroups)
 
 	if err := validation.collectComponentFailures(ctx, v.k8sClient); err != nil {
 		return nil, fmt.Errorf("cannot get component status for %q: %v", clusterName, err)
 	}
 
-	if err := validation.collectPodFailures(ctx, v.k8sClient, nodeList.Items); err != nil {
+	if err := validation.collectPodFailures(ctx, v.k8sClient, readyNodes); err != nil {
 		return nil, fmt.Errorf("cannot get pod health for %q: %v", clusterName, err)
 	}
 
@@ -199,13 +199,22 @@ func (v *ValidationCluster) collectComponentFailures(ctx context.Context, client
 	return nil
 }
 
+var masterStaticPods = []string{
+	"kube-apiserver",
+	"kube-controller-manager",
+	"kube-scheduler",
+}
+
 func (v *ValidationCluster) collectPodFailures(ctx context.Context, client kubernetes.Interface, nodes []v1.Node) error {
-	masterWithoutManager := map[string]bool{}
+	masterWithoutPod := map[string]map[string]bool{}
 	nodeByAddress := map[string]string{}
 	for _, node := range nodes {
 		labels := node.GetLabels()
 		if labels != nil && labels["kubernetes.io/role"] == "master" {
-			masterWithoutManager[node.Name] = true
+			masterWithoutPod[node.Name] = map[string]bool{}
+			for _, pod := range masterStaticPods {
+				masterWithoutPod[node.Name][pod] = true
+			}
 		}
 		for _, nodeAddress := range node.Status.Addresses {
 			nodeByAddress[nodeAddress.Address] = node.Name
@@ -254,9 +263,9 @@ func (v *ValidationCluster) collectPodFailures(ctx context.Context, client kuber
 
 		}
 
-		labels := pod.GetLabels()
-		if pod.Namespace == "kube-system" && labels != nil && labels["k8s-app"] == "kube-controller-manager" {
-			delete(masterWithoutManager, nodeByAddress[pod.Status.HostIP])
+		app := pod.GetLabels()["k8s-app"]
+		if pod.Namespace == "kube-system" && masterWithoutPod[nodeByAddress[pod.Status.HostIP]][app] {
+			delete(masterWithoutPod[nodeByAddress[pod.Status.HostIP]], app)
 		}
 		return nil
 	})
@@ -264,37 +273,43 @@ func (v *ValidationCluster) collectPodFailures(ctx context.Context, client kuber
 		return fmt.Errorf("error listing Pods: %v", err)
 	}
 
-	for node := range masterWithoutManager {
-		v.addError(&ValidationError{
-			Kind:    "Node",
-			Name:    node,
-			Message: fmt.Sprintf("master %q is missing kube-controller-manager pod", node),
-		})
+	for node, nodeMap := range masterWithoutPod {
+		for app := range nodeMap {
+			v.addError(&ValidationError{
+				Kind:    "Node",
+				Name:    node,
+				Message: fmt.Sprintf("master %q is missing %s pod", node, app),
+			})
+		}
 	}
 
 	return nil
 }
 
-func (v *ValidationCluster) validateNodes(cloudGroups map[string]*cloudinstances.CloudInstanceGroup) {
+func (v *ValidationCluster) validateNodes(cloudGroups map[string]*cloudinstances.CloudInstanceGroup, groups []*kops.InstanceGroup) []v1.Node {
+	var readyNodes []v1.Node
+	groupsSeen := map[string]bool{}
+
 	for _, cloudGroup := range cloudGroups {
 		var allMembers []*cloudinstances.CloudInstanceGroupMember
 		allMembers = append(allMembers, cloudGroup.Ready...)
 		allMembers = append(allMembers, cloudGroup.NeedUpdate...)
 
+		groupsSeen[cloudGroup.InstanceGroup.Name] = true
 		numNodes := 0
 		for _, m := range allMembers {
 			if !m.Detached {
 				numNodes++
 			}
 		}
-		if numNodes < cloudGroup.MinSize {
+		if numNodes < cloudGroup.TargetSize {
 			v.addError(&ValidationError{
 				Kind: "InstanceGroup",
 				Name: cloudGroup.InstanceGroup.Name,
 				Message: fmt.Sprintf("InstanceGroup %q did not have enough nodes %d vs %d",
 					cloudGroup.InstanceGroup.Name,
 					numNodes,
-					cloudGroup.MinSize),
+					cloudGroup.TargetSize),
 			})
 		}
 
@@ -325,13 +340,19 @@ func (v *ValidationCluster) validateNodes(cloudGroups map[string]*cloudinstances
 
 			n := &ValidationNode{
 				Name:     node.Name,
-				Zone:     node.ObjectMeta.Labels["failure-domain.beta.kubernetes.io/zone"],
+				Zone:     node.ObjectMeta.Labels["topology.kubernetes.io/zone"],
 				Hostname: node.ObjectMeta.Labels["kubernetes.io/hostname"],
 				Role:     role,
 				Status:   getNodeReadyStatus(node),
 			}
+			if n.Zone == "" {
+				n.Zone = node.ObjectMeta.Labels["failure-domain.beta.kubernetes.io/zone"]
+			}
 
 			ready := isNodeReady(node)
+			if ready {
+				readyNodes = append(readyNodes, *node)
+			}
 
 			if n.Role == "master" {
 				if !ready {
@@ -358,4 +379,16 @@ func (v *ValidationCluster) validateNodes(cloudGroups map[string]*cloudinstances
 			}
 		}
 	}
+
+	for _, ig := range groups {
+		if !groupsSeen[ig.Name] {
+			v.addError(&ValidationError{
+				Kind:    "InstanceGroup",
+				Name:    ig.Name,
+				Message: fmt.Sprintf("InstanceGroup %q is missing from the cloud provider", ig.Name),
+			})
+		}
+	}
+
+	return readyNodes
 }

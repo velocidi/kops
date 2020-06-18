@@ -86,11 +86,9 @@ func (b *KubeAPIServerOptionsBuilder) BuildOptions(o interface{}) error {
 	} else if clusterSpec.Authorization.RBAC != nil {
 		var modes []string
 
-		if b.IsKubernetesGTE("1.10") {
-			if fi.BoolValue(clusterSpec.KubeAPIServer.EnableBootstrapAuthToken) {
-				// Enable the Node authorizer, used for special per-node RBAC policies
-				modes = append(modes, "Node")
-			}
+		if fi.BoolValue(clusterSpec.KubeAPIServer.EnableBootstrapAuthToken) {
+			// Enable the Node authorizer, used for special per-node RBAC policies
+			modes = append(modes, "Node")
 		}
 		modes = append(modes, "RBAC")
 
@@ -134,7 +132,7 @@ func (b *KubeAPIServerOptionsBuilder) BuildOptions(o interface{}) error {
 		return nil
 	}
 
-	image, err := Image("kube-apiserver", b.Architecture(), clusterSpec, b.AssetBuilder)
+	image, err := Image("kube-apiserver", clusterSpec, b.AssetBuilder)
 	if err != nil {
 		return err
 	}
@@ -147,10 +145,6 @@ func (b *KubeAPIServerOptionsBuilder) BuildOptions(o interface{}) error {
 		c.CloudProvider = "gce"
 	case kops.CloudProviderDO:
 		c.CloudProvider = "external"
-	case kops.CloudProviderVSphere:
-		c.CloudProvider = "vsphere"
-	case kops.CloudProviderBareMetal:
-		// for baremetal, we don't specify a cloudprovider to apiserver
 	case kops.CloudProviderOpenstack:
 		c.CloudProvider = "openstack"
 	case kops.CloudProviderALI:
@@ -166,12 +160,8 @@ func (b *KubeAPIServerOptionsBuilder) BuildOptions(o interface{}) error {
 	c.LogLevel = 2
 	c.SecurePort = 443
 
-	if b.IsKubernetesGTE("1.10") {
-		c.BindAddress = "0.0.0.0"
-		c.InsecureBindAddress = "127.0.0.1"
-	} else {
-		c.Address = "127.0.0.1"
-	}
+	c.BindAddress = "0.0.0.0"
+	c.InsecureBindAddress = "127.0.0.1"
 
 	c.AllowPrivileged = fi.Bool(true)
 	c.ServiceClusterIPRange = clusterSpec.ServiceClusterIPRange
@@ -179,24 +169,9 @@ func (b *KubeAPIServerOptionsBuilder) BuildOptions(o interface{}) error {
 	c.EtcdServersOverrides = []string{"/events#http://127.0.0.1:4002"}
 
 	// TODO: We can probably rewrite these more clearly in descending order
-	if b.IsKubernetesLT("1.10") {
-		c.AdmissionControl = []string{
-			"Initializers",
-			"NamespaceLifecycle",
-			"LimitRanger",
-			"ServiceAccount",
-			"PersistentVolumeLabel",
-			"DefaultStorageClass",
-			"DefaultTolerationSeconds",
-			"MutatingAdmissionWebhook",
-			"ValidatingAdmissionWebhook",
-			"NodeRestriction",
-			"ResourceQuota",
-		}
-	}
 	// Based on recommendations from:
 	// https://kubernetes.io/docs/admin/admission-controllers/#is-there-a-recommended-set-of-admission-controllers-to-use
-	if b.IsKubernetesGTE("1.10") && b.IsKubernetesLT("1.12") {
+	if b.IsKubernetesLT("1.12") {
 		c.EnableAdmissionPlugins = []string{
 			"Initializers",
 			"NamespaceLifecycle",
@@ -233,8 +208,13 @@ func (b *KubeAPIServerOptionsBuilder) BuildOptions(o interface{}) error {
 	// We make sure to disable AnonymousAuth
 	c.AnonymousAuth = fi.Bool(false)
 
-	// FIXME : Disable the insecure port when kubernetes issue #43784 is fixed
-	c.InsecurePort = 8080
+	if b.IsKubernetesGTE("1.17") {
+		// We query via the kube-apiserver-healthcheck proxy, which listens on port 3990
+		c.InsecurePort = 0
+	} else {
+		// Older versions of kubernetes continue to rely on the insecure port: kubernetes issue #43784
+		c.InsecurePort = 8080
+	}
 
 	return nil
 }

@@ -25,6 +25,7 @@ import (
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/assets"
 	"k8s.io/kops/pkg/featureflag"
+	"k8s.io/kops/pkg/model"
 	"k8s.io/kops/pkg/templates"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/fitasks"
@@ -33,7 +34,7 @@ import (
 
 // BootstrapChannelBuilder is responsible for handling the addons in channels
 type BootstrapChannelBuilder struct {
-	cluster      *kops.Cluster
+	*model.KopsModelContext
 	Lifecycle    *fi.Lifecycle
 	templates    *templates.Templates
 	assetBuilder *assets.AssetBuilder
@@ -55,7 +56,7 @@ func (b *BootstrapChannelBuilder) Build(c *fi.ModelBuilderContext) error {
 		if a.Id != "" {
 			key = key + "-" + a.Id
 		}
-		name := b.cluster.ObjectMeta.Name + "-addons-" + key
+		name := b.Cluster.ObjectMeta.Name + "-addons-" + key
 		manifestPath := "addons/" + *a.Manifest
 
 		manifestResource := b.templates.Find(manifestPath)
@@ -102,7 +103,7 @@ func (b *BootstrapChannelBuilder) Build(c *fi.ModelBuilderContext) error {
 		return fmt.Errorf("error serializing addons yaml: %v", err)
 	}
 
-	name := b.cluster.ObjectMeta.Name + "-addons-bootstrap"
+	name := b.Cluster.ObjectMeta.Name + "-addons-bootstrap"
 
 	tasks[name] = &fitasks.ManagedFile{
 		Contents:  fi.WrapResource(fi.NewBytesResource(addonsYAML)),
@@ -121,7 +122,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 
 	{
 		key := "kops-controller.addons.k8s.io"
-		version := "1.18.0-alpha.2"
+		version := "1.18.0-alpha.3"
 
 		{
 			location := key + "/k8s-1.16.yaml"
@@ -152,25 +153,10 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 	}
 
 	// @check if podsecuritypolicies are enabled and if so, push the default kube-system policy
-	if b.cluster.Spec.KubeAPIServer != nil && b.cluster.Spec.KubeAPIServer.HasAdmissionController("PodSecurityPolicy") {
+	if b.Cluster.Spec.KubeAPIServer != nil && b.Cluster.Spec.KubeAPIServer.HasAdmissionController("PodSecurityPolicy") {
 		key := "podsecuritypolicy.addons.k8s.io"
 		version := "0.0.4"
 
-		{
-			location := key + "/k8s-1.9.yaml"
-			id := "k8s-1.9"
-
-			addons.Spec.Addons = append(addons.Spec.Addons, &channelsapi.AddonSpec{
-				Name:              fi.String(key),
-				Version:           fi.String(version),
-				Selector:          map[string]string{"k8s-addon": key},
-				Manifest:          fi.String(location),
-				KubernetesVersion: ">=1.9.0 <1.10.0",
-				Id:                id,
-			})
-		}
-
-		// In k8s v1.10, the PodSecurityPolicy API has been moved to the policy/v1beta1 API group
 		{
 			location := key + "/k8s-1.10.yaml"
 			id := "k8s-1.10"
@@ -200,7 +186,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if b.cluster.Spec.NodeAuthorization != nil {
+	if b.Cluster.Spec.NodeAuthorization != nil {
 		{
 			key := "node-authorizer.addons.k8s.io"
 			version := "v0.0.4-kops.2"
@@ -235,7 +221,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	kubeDNS := b.cluster.Spec.KubeDNS
+	kubeDNS := b.Cluster.Spec.KubeDNS
 	if kubeDNS.Provider == "KubeDNS" || kubeDNS.Provider == "" {
 
 		{
@@ -316,11 +302,11 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 	// this manifest. For clusters whom are upgrading from RBAC to Node,RBAC the clusterrolebinding
 	// will remain and have to be deleted manually once all the nodes have been upgraded.
 	enableRBACAddon := true
-	if b.cluster.Spec.NodeAuthorization != nil {
+	if b.Cluster.Spec.NodeAuthorization != nil {
 		enableRBACAddon = false
 	}
-	if b.cluster.Spec.KubeAPIServer != nil {
-		if b.cluster.Spec.KubeAPIServer.EnableBootstrapAuthToken != nil && *b.cluster.Spec.KubeAPIServer.EnableBootstrapAuthToken {
+	if b.Cluster.Spec.KubeAPIServer != nil {
+		if b.Cluster.Spec.KubeAPIServer.EnableBootstrapAuthToken != nil && *b.Cluster.Spec.KubeAPIServer.EnableBootstrapAuthToken {
 			enableRBACAddon = false
 		}
 	}
@@ -380,11 +366,11 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 	}
 
 	// @check the dns-controller has not been disabled
-	externalDNS := b.cluster.Spec.ExternalDNS
+	externalDNS := b.Cluster.Spec.ExternalDNS
 	if externalDNS == nil || !externalDNS.Disable {
 		{
 			key := "dns-controller.addons.k8s.io"
-			version := "1.18.0-alpha.2"
+			version := "1.18.0-alpha.3"
 
 			{
 				location := key + "/k8s-1.6.yaml"
@@ -452,7 +438,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 	}
 
 	// @check if the node-local-dns is enabled
-	NodeLocalDNS := b.cluster.Spec.KubeDNS.NodeLocalDNS
+	NodeLocalDNS := b.Cluster.Spec.KubeDNS.NodeLocalDNS
 	if kubeDNS.Provider == "CoreDNS" && NodeLocalDNS != nil && fi.BoolValue(NodeLocalDNS.Enabled) {
 		{
 			key := "nodelocaldns.addons.k8s.io"
@@ -474,7 +460,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if kops.CloudProviderID(b.cluster.Spec.CloudProvider) == kops.CloudProviderAWS {
+	if kops.CloudProviderID(b.Cluster.Spec.CloudProvider) == kops.CloudProviderAWS {
 		key := "storage-aws.addons.k8s.io"
 		version := "1.15.0"
 
@@ -507,7 +493,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if kops.CloudProviderID(b.cluster.Spec.CloudProvider) == kops.CloudProviderDO {
+	if kops.CloudProviderID(b.Cluster.Spec.CloudProvider) == kops.CloudProviderDO {
 		key := "digitalocean-cloud-controller.addons.k8s.io"
 		version := "1.8.1-kops.1"
 
@@ -525,7 +511,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if kops.CloudProviderID(b.cluster.Spec.CloudProvider) == kops.CloudProviderGCE {
+	if kops.CloudProviderID(b.Cluster.Spec.CloudProvider) == kops.CloudProviderGCE {
 		key := "storage-gce.addons.k8s.io"
 		version := "1.7.0"
 
@@ -543,7 +529,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if featureflag.Spotinst.Enabled() {
+	if featureflag.Spotinst.Enabled() && featureflag.SpotinstController.Enabled() {
 		key := "spotinst-kubernetes-cluster-controller.addons.k8s.io"
 
 		{
@@ -563,7 +549,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		{
 			id := "v1.14.0"
 			location := key + "/" + id + ".yaml"
-			version := "1.0.57"
+			version := "1.0.58"
 
 			addons.Spec.Addons = append(addons.Spec.Addons, &channelsapi.AddonSpec{
 				Name:              fi.String(key),
@@ -578,7 +564,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 
 	// The metadata-proxy daemonset conceals node metadata endpoints in GCE.
 	// It will land on nodes labeled cloud.google.com/metadata-proxy-ready=true
-	if kops.CloudProviderID(b.cluster.Spec.CloudProvider) == kops.CloudProviderGCE {
+	if kops.CloudProviderID(b.Cluster.Spec.CloudProvider) == kops.CloudProviderGCE {
 		key := "metadata-proxy.addons.k8s.io"
 		version := "0.1.12"
 
@@ -615,7 +601,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 	// hasn't changed.  The problem with semver is that there is nothing > 1.0.0 other than 1.0.1-pre.1
 	networkingSelector := map[string]string{"role.kubernetes.io/networking": "1"}
 
-	if b.cluster.Spec.Networking.Kopeio != nil {
+	if b.Cluster.Spec.Networking.Kopeio != nil {
 		key := "networking.kope.io"
 		version := "1.0.20181028-kops.2"
 
@@ -648,11 +634,11 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if b.cluster.Spec.Networking.Weave != nil {
+	if b.Cluster.Spec.Networking.Weave != nil {
 		key := "networking.weave"
 		versions := map[string]string{
-			"k8s-1.8":  "2.6.2-kops.2",
-			"k8s-1.12": "2.6.2-kops.2",
+			"k8s-1.8":  "2.6.5-kops.1",
+			"k8s-1.12": "2.6.5-kops.1",
 		}
 
 		{
@@ -684,7 +670,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if b.cluster.Spec.Networking.Flannel != nil {
+	if b.Cluster.Spec.Networking.Flannel != nil {
 		key := "networking.flannel"
 		versions := map[string]string{
 			"k8s-1.6":  "0.11.0-kops.2",
@@ -720,13 +706,13 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if b.cluster.Spec.Networking.Calico != nil {
+	if b.Cluster.Spec.Networking.Calico != nil {
 		key := "networking.projectcalico.org"
 		versions := map[string]string{
 			"k8s-1.7":    "2.6.12-kops.1",
 			"k8s-1.7-v3": "3.8.0-kops.2",
-			"k8s-1.12":   "3.9.5-kops.3",
-			"k8s-1.16":   "3.13.3-kops.2",
+			"k8s-1.12":   "3.9.6-kops.1",
+			"k8s-1.16":   "3.13.4-kops.1",
 		}
 
 		{
@@ -757,7 +743,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 			})
 		}
 
-		if b.cluster.Spec.Networking.Calico.MajorVersion == "v3" {
+		if b.Cluster.Spec.Networking.Calico.MajorVersion == "v3" {
 			{
 				id := "k8s-1.7-v3"
 				location := key + "/" + id + ".yaml"
@@ -788,13 +774,13 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if b.cluster.Spec.Networking.Canal != nil {
+	if b.Cluster.Spec.Networking.Canal != nil {
 		key := "networking.projectcalico.org.canal"
 		versions := map[string]string{
 			"k8s-1.9":  "3.2.3-kops.1",
 			"k8s-1.12": "3.7.5-kops.2",
-			"k8s-1.15": "3.12.1-kops.2",
-			"k8s-1.16": "3.13.3-kops.2",
+			"k8s-1.15": "3.12.2-kops.1",
+			"k8s-1.16": "3.13.4-kops.1",
 		}
 		{
 			id := "k8s-1.9"
@@ -850,7 +836,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if b.cluster.Spec.Networking.Kuberouter != nil {
+	if b.Cluster.Spec.Networking.Kuberouter != nil {
 		key := "networking.kuberouter"
 		versions := map[string]string{
 			"k8s-1.6":  "0.3.1-kops.3",
@@ -886,61 +872,13 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if b.cluster.Spec.Networking.Romana != nil {
-		key := "networking.romana"
-		version := "v2.0.2-kops.3"
-
-		{
-			location := key + "/k8s-1.7.yaml"
-			id := "k8s-1.7"
-
-			addons.Spec.Addons = append(addons.Spec.Addons, &channelsapi.AddonSpec{
-				Name:              fi.String(key),
-				Version:           fi.String(version),
-				Selector:          networkingSelector,
-				Manifest:          fi.String(location),
-				KubernetesVersion: "<1.12.0",
-				Id:                id,
-			})
-		}
-
-		{
-			location := key + "/k8s-1.12.yaml"
-			id := "k8s-1.12"
-
-			addons.Spec.Addons = append(addons.Spec.Addons, &channelsapi.AddonSpec{
-				Name:              fi.String(key),
-				Version:           fi.String(version),
-				Selector:          networkingSelector,
-				Manifest:          fi.String(location),
-				KubernetesVersion: ">=1.12.0",
-				Id:                id,
-			})
-		}
-	}
-
-	if b.cluster.Spec.Networking.AmazonVPC != nil {
+	if b.Cluster.Spec.Networking.AmazonVPC != nil {
 		key := "networking.amazon-vpc-routed-eni"
 
 		versions := map[string]string{
-			"k8s-1.8":  "1.5.0-kops.1",
 			"k8s-1.10": "1.5.0-kops.2",
 			"k8s-1.12": "1.5.5-kops.1",
 			"k8s-1.16": "1.6.0-kops.1",
-		}
-
-		{
-			id := "k8s-1.8"
-			location := key + "/" + id + ".yaml"
-
-			addons.Spec.Addons = append(addons.Spec.Addons, &channelsapi.AddonSpec{
-				Name:              fi.String(key),
-				Version:           fi.String(versions[id]),
-				Selector:          networkingSelector,
-				Manifest:          fi.String(location),
-				KubernetesVersion: "<1.10.0",
-				Id:                id,
-			})
 		}
 
 		{
@@ -986,7 +924,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if b.cluster.Spec.Networking.Cilium != nil {
+	if b.Cluster.Spec.Networking.Cilium != nil {
 		key := "networking.cilium.io"
 		version := "1.7.3-kops.1"
 
@@ -1021,8 +959,8 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 
 	authenticationSelector := map[string]string{"role.kubernetes.io/authentication": "1"}
 
-	if b.cluster.Spec.Authentication != nil {
-		if b.cluster.Spec.Authentication.Kopeio != nil {
+	if b.Cluster.Spec.Authentication != nil {
+		if b.Cluster.Spec.Authentication.Kopeio != nil {
 			key := "authentication.kope.io"
 			version := "1.0.20181028-kops.1"
 
@@ -1054,7 +992,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 				})
 			}
 		}
-		if b.cluster.Spec.Authentication.Aws != nil {
+		if b.Cluster.Spec.Authentication.Aws != nil {
 			key := "authentication.aws"
 			version := "0.4.0-kops.2"
 
@@ -1088,9 +1026,9 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if featureflag.EnableExternalCloudController.Enabled() && b.cluster.Spec.ExternalCloudControllerManager != nil {
+	if featureflag.EnableExternalCloudController.Enabled() && b.Cluster.Spec.ExternalCloudControllerManager != nil {
 		// cloudprovider specific out-of-tree controller
-		if kops.CloudProviderID(b.cluster.Spec.CloudProvider) == kops.CloudProviderOpenstack {
+		if kops.CloudProviderID(b.Cluster.Spec.CloudProvider) == kops.CloudProviderOpenstack {
 			{
 				key := "openstack.addons.k8s.io"
 				version := "1.11.0"
@@ -1103,7 +1041,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 					Version:           fi.String(version),
 					Manifest:          fi.String(location),
 					Selector:          map[string]string{"k8s-addon": key},
-					KubernetesVersion: ">=1.11.0 <1.13.0",
+					KubernetesVersion: "<1.13.0",
 					Id:                id,
 				})
 			}
@@ -1160,7 +1098,7 @@ func (b *BootstrapChannelBuilder) buildAddons() *channelsapi.Addons {
 		}
 	}
 
-	if b.cluster.Spec.KubeScheduler.UsePolicyConfigMap != nil {
+	if b.Cluster.Spec.KubeScheduler.UsePolicyConfigMap != nil {
 		key := "scheduler.addons.k8s.io"
 		version := "1.7.0"
 		location := key + "/v" + version + ".yaml"

@@ -18,17 +18,13 @@ package model
 
 import (
 	"bytes"
-	"crypto/x509"
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/flagbuilder"
-	"k8s.io/kops/pkg/pki"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
-	"k8s.io/kops/util/pkg/vfs"
 )
 
 func Test_KubeAPIServer_Builder(t *testing.T) {
@@ -43,7 +39,9 @@ func Test_KubeAPIServer_Builder(t *testing.T) {
 		t.Fatalf("error loading model %q: %v", basedir, err)
 		return
 	}
-	nodeUpModelContext.KeyStore = &fakeKeyStore{T: t}
+	keystore := &fakeCAStore{}
+	keystore.T = t
+	nodeUpModelContext.KeyStore = keystore
 
 	builder := KubeAPIServerBuilder{NodeupModelContext: nodeUpModelContext}
 
@@ -64,63 +62,6 @@ func Test_KubeAPIServer_Builder(t *testing.T) {
 			t.Error("Older versions of k8s should not have --audit-dynamic-configuration flag")
 		}
 	}
-}
-
-type fakeKeyStore struct {
-	T *testing.T
-}
-
-func (k fakeKeyStore) FindKeypair(name string) (*pki.Certificate, *pki.PrivateKey, fi.KeysetFormat, error) {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) CreateKeypair(signer string, name string, template *x509.Certificate, privateKey *pki.PrivateKey) (*pki.Certificate, error) {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) StoreKeypair(id string, cert *pki.Certificate, privateKey *pki.PrivateKey) error {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) MirrorTo(basedir vfs.Path) error {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) CertificatePool(name string, createIfMissing bool) (*fi.CertificatePool, error) {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) FindCertificatePool(name string) (*fi.CertificatePool, error) {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) FindCertificateKeyset(name string) (*kops.Keyset, error) {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) FindPrivateKey(name string) (*pki.PrivateKey, error) {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) FindPrivateKeyset(name string) (*kops.Keyset, error) {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) FindCert(name string) (*pki.Certificate, error) {
-	assert.Equal(k.T, "apiserver-aggregator-ca", name)
-	return &pki.Certificate{}, nil
-}
-
-func (k fakeKeyStore) ListKeysets() ([]*kops.Keyset, error) {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) AddCert(name string, cert *pki.Certificate) error {
-	panic("implement me")
-}
-
-func (k fakeKeyStore) DeleteKeysetItem(item *kops.Keyset, id string) error {
-	panic("implement me")
 }
 
 func Test_KubeAPIServer_BuildFlags(t *testing.T) {
@@ -241,4 +182,11 @@ func Test_KubeAPIServer_BuildFlags(t *testing.T) {
 			t.Errorf("flags did not match.  actual=%q expected=%q", actual, g.expected)
 		}
 	}
+}
+
+func TestKubeAPIServerBuilder(t *testing.T) {
+	RunGoldenTest(t, "tests/golden/minimal", "kube-apiserver", func(nodeupModelContext *NodeupModelContext, target *fi.ModelBuilderContext) error {
+		builder := KubeAPIServerBuilder{NodeupModelContext: nodeupModelContext}
+		return builder.Build(target)
+	})
 }

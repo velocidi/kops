@@ -114,7 +114,7 @@ func verifyPackageHash(u string, hash string, expectedVersion string) error {
 		return err
 	}
 
-	actualHash, err := hashing.HashAlgorithmSHA1.HashFile(p)
+	actualHash, err := hashing.HashAlgorithmSHA256.HashFile(p)
 	if err != nil {
 		return fmt.Errorf("error hashing file: %v", err)
 	}
@@ -262,5 +262,5 @@ func runDockerBuilderTest(t *testing.T, key string) {
 		return
 	}
 
-	testutils.ValidateTasks(t, basedir, context)
+	testutils.ValidateTasks(t, filepath.Join(basedir, "tasks.yaml"), context)
 }

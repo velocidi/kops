@@ -20,8 +20,6 @@ import (
 	"reflect"
 	"testing"
 
-	"crypto/x509"
-
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/pki"
@@ -48,9 +46,7 @@ func (f fakeStatusStore) GetApiIngressStatus(cluster *kops.Cluster) ([]kops.ApiI
 
 // mock a fake key store
 type fakeKeyStore struct {
-	FindKeypairFn func(name string) (*pki.Certificate, *pki.PrivateKey, fi.KeysetFormat, error)
-
-	CreateKeypairFn func(signer string, name string, template *x509.Certificate, privateKey *pki.PrivateKey) (*pki.Certificate, error)
+	FindKeypairFn func(name string) (*pki.Certificate, *pki.PrivateKey, bool, error)
 
 	// StoreKeypair writes the keypair to the store
 	StoreKeypairFn func(id string, cert *pki.Certificate, privateKey *pki.PrivateKey) error
@@ -59,12 +55,8 @@ type fakeKeyStore struct {
 	MirrorToFn func(basedir vfs.Path) error
 }
 
-func (f fakeKeyStore) FindKeypair(name string) (*pki.Certificate, *pki.PrivateKey, fi.KeysetFormat, error) {
+func (f fakeKeyStore) FindKeypair(name string) (*pki.Certificate, *pki.PrivateKey, bool, error) {
 	return f.FindKeypairFn(name)
-}
-
-func (f fakeKeyStore) CreateKeypair(signer string, name string, template *x509.Certificate, privateKey *pki.PrivateKey) (*pki.Certificate, error) {
-	return f.CreateKeypairFn(signer, name, template, privateKey)
 }
 
 func (f fakeKeyStore) StoreKeypair(id string, cert *pki.Certificate, privateKey *pki.PrivateKey) error {
@@ -144,10 +136,10 @@ func TestBuildKubecfg(t *testing.T) {
 			args{
 				publiccluster,
 				fakeKeyStore{
-					FindKeypairFn: func(name string) (*pki.Certificate, *pki.PrivateKey, fi.KeysetFormat, error) {
+					FindKeypairFn: func(name string) (*pki.Certificate, *pki.PrivateKey, bool, error) {
 						return fakeCertificate(),
 							fakePrivateKey(),
-							fi.KeysetFormatLegacy,
+							true,
 							nil
 					},
 				},
@@ -169,10 +161,10 @@ func TestBuildKubecfg(t *testing.T) {
 			args{
 				emptyMasterPublicNameCluster,
 				fakeKeyStore{
-					FindKeypairFn: func(name string) (*pki.Certificate, *pki.PrivateKey, fi.KeysetFormat, error) {
+					FindKeypairFn: func(name string) (*pki.Certificate, *pki.PrivateKey, bool, error) {
 						return fakeCertificate(),
 							fakePrivateKey(),
-							fi.KeysetFormatLegacy,
+							true,
 							nil
 					},
 				},
@@ -194,10 +186,10 @@ func TestBuildKubecfg(t *testing.T) {
 			args{
 				gossipCluster,
 				fakeKeyStore{
-					FindKeypairFn: func(name string) (*pki.Certificate, *pki.PrivateKey, fi.KeysetFormat, error) {
+					FindKeypairFn: func(name string) (*pki.Certificate, *pki.PrivateKey, bool, error) {
 						return fakeCertificate(),
 							fakePrivateKey(),
-							fi.KeysetFormatLegacy,
+							true,
 							nil
 					},
 				},

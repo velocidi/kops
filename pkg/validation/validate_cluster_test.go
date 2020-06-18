@@ -73,6 +73,34 @@ func testValidate(t *testing.T, groups map[string]*cloudinstances.CloudInstanceG
 		ObjectMeta: metav1.ObjectMeta{Name: "testcluster.k8s.local"},
 	}
 
+	if len(groups) == 0 {
+		groups = make(map[string]*cloudinstances.CloudInstanceGroup)
+		groups["master-1"] = &cloudinstances.CloudInstanceGroup{
+			InstanceGroup: &kopsapi.InstanceGroup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "master-1",
+				},
+				Spec: kopsapi.InstanceGroupSpec{
+					Role: kopsapi.InstanceGroupRoleMaster,
+				},
+			},
+			MinSize: 1,
+			Ready: []*cloudinstances.CloudInstanceGroupMember{
+				{
+					ID: "i-00001",
+					Node: &v1.Node{
+						ObjectMeta: metav1.ObjectMeta{Name: "master-1a"},
+						Status: v1.NodeStatus{
+							Conditions: []v1.NodeCondition{
+								{Type: "Ready", Status: v1.ConditionTrue},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
 	instanceGroups := make([]kopsapi.InstanceGroup, 0, len(groups))
 	objects = append([]runtime.Object(nil), objects...)
 	for _, g := range groups {
@@ -91,19 +119,6 @@ func testValidate(t *testing.T, groups map[string]*cloudinstances.CloudInstanceG
 		}
 	}
 
-	if len(instanceGroups) == 0 {
-		instanceGroups = []kopsapi.InstanceGroup{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "master-1",
-				},
-				Spec: kopsapi.InstanceGroupSpec{
-					Role: kopsapi.InstanceGroupRoleMaster,
-				},
-			},
-		}
-	}
-
 	mockcloud := BuildMockCloud(t, groups, cluster, instanceGroups)
 
 	validator, err := NewClusterValidator(cluster, mockcloud, &kopsapi.InstanceGroupList{Items: instanceGroups}, fake.NewSimpleClientset(objects...))
@@ -111,6 +126,37 @@ func testValidate(t *testing.T, groups map[string]*cloudinstances.CloudInstanceG
 		return nil, err
 	}
 	return validator.Validate()
+}
+
+func Test_ValidateCloudGroupMissing(t *testing.T) {
+	cluster := &kopsapi.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "testcluster.k8s.local"},
+	}
+	instanceGroups := []kopsapi.InstanceGroup{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node-1",
+			},
+			Spec: kopsapi.InstanceGroupSpec{
+				Role: kopsapi.InstanceGroupRoleNode,
+			},
+		},
+	}
+
+	mockcloud := BuildMockCloud(t, nil, cluster, instanceGroups)
+
+	validator, err := NewClusterValidator(cluster, mockcloud, &kopsapi.InstanceGroupList{Items: instanceGroups}, fake.NewSimpleClientset())
+	require.NoError(t, err)
+	v, err := validator.Validate()
+	require.NoError(t, err)
+	if !assert.Len(t, v.Failures, 1) ||
+		!assert.Equal(t, &ValidationError{
+			Kind:    "InstanceGroup",
+			Name:    "node-1",
+			Message: "InstanceGroup \"node-1\" is missing from the cloud provider",
+		}, v.Failures[0]) {
+		printDebug(t, v)
+	}
 }
 
 func Test_ValidateNodesNotEnough(t *testing.T) {
@@ -124,7 +170,8 @@ func Test_ValidateNodesNotEnough(t *testing.T) {
 				Role: kopsapi.InstanceGroupRoleNode,
 			},
 		},
-		MinSize: 3,
+		MinSize:    2,
+		TargetSize: 3,
 		Ready: []*cloudinstances.CloudInstanceGroupMember{
 			{
 				ID: "i-00001",
@@ -176,7 +223,8 @@ func Test_ValidateDetachedNodesDontCount(t *testing.T) {
 				Role: kopsapi.InstanceGroupRoleNode,
 			},
 		},
-		MinSize: 2,
+		MinSize:    2,
+		TargetSize: 2,
 		Ready: []*cloudinstances.CloudInstanceGroupMember{
 			{
 				ID: "i-00001",
@@ -229,7 +277,8 @@ func Test_ValidateNodeNotReady(t *testing.T) {
 				Role: kopsapi.InstanceGroupRoleNode,
 			},
 		},
-		MinSize: 2,
+		MinSize:    2,
+		TargetSize: 2,
 		Ready: []*cloudinstances.CloudInstanceGroupMember{
 			{
 				ID: "i-00001",
@@ -281,7 +330,8 @@ func Test_ValidateMastersNotEnough(t *testing.T) {
 				Role: kopsapi.InstanceGroupRoleMaster,
 			},
 		},
-		MinSize: 3,
+		MinSize:    2,
+		TargetSize: 3,
 		Ready: []*cloudinstances.CloudInstanceGroupMember{
 			{
 				ID: "i-00001",
@@ -333,7 +383,8 @@ func Test_ValidateMasterNotReady(t *testing.T) {
 				Role: kopsapi.InstanceGroupRoleMaster,
 			},
 		},
-		MinSize: 2,
+		MinSize:    2,
+		TargetSize: 2,
 		Ready: []*cloudinstances.CloudInstanceGroupMember{
 			{
 				ID: "i-00001",
@@ -374,7 +425,7 @@ func Test_ValidateMasterNotReady(t *testing.T) {
 	}
 }
 
-func Test_ValidateMasterNoKubeControllerManager(t *testing.T) {
+func Test_ValidateMasterStaticPods(t *testing.T) {
 	groups := make(map[string]*cloudinstances.CloudInstanceGroup)
 	groups["node-1"] = &cloudinstances.CloudInstanceGroup{
 		InstanceGroup: &kopsapi.InstanceGroup{
@@ -385,7 +436,8 @@ func Test_ValidateMasterNoKubeControllerManager(t *testing.T) {
 				Role: kopsapi.InstanceGroupRoleMaster,
 			},
 		},
-		MinSize: 1,
+		MinSize:    1,
+		TargetSize: 1,
 		Ready: []*cloudinstances.CloudInstanceGroupMember{
 			{
 				ID: "i-00001",
@@ -427,37 +479,71 @@ func Test_ValidateMasterNoKubeControllerManager(t *testing.T) {
 					},
 				},
 			},
+			{
+				ID: "i-00003",
+				Node: &v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "master-1c",
+						Labels: map[string]string{"kubernetes.io/role": "master"},
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{Type: "Ready", Status: v1.ConditionFalse},
+						},
+						Addresses: []v1.NodeAddress{
+							{
+								Address: "9.10.11.12",
+							},
+						},
+					},
+				},
+			},
 		},
 	}
 
-	v, err := testValidate(t, groups, makePodList(
-		[]map[string]string{
+	var podList []map[string]string
+	expectedFailures := []*ValidationError{
+		{
+			Kind:    "Node",
+			Name:    "master-1c",
+			Message: "master \"master-1c\" is not ready",
+		},
+	}
+
+	for i, pod := range []string{
+		"kube-apiserver",
+		"kube-controller-manager",
+		"kube-scheduler",
+	} {
+		podList = append(podList, []map[string]string{
 			{
-				"name":              "pod1",
+				"name":              fmt.Sprintf("pod-a-%d", i),
 				"ready":             "true",
-				"k8s-app":           "kube-controller-manager",
+				"k8s-app":           pod,
 				"phase":             string(v1.PodRunning),
 				"priorityClassName": "system-cluster-critical",
 				"hostip":            "1.2.3.4",
 			},
 			{
-				"name":              "pod2",
+				"name":              fmt.Sprintf("pod-b-%d", i),
 				"namespace":         "other",
 				"ready":             "true",
-				"k8s-app":           "kube-controller-manager",
+				"k8s-app":           pod,
 				"phase":             string(v1.PodRunning),
 				"priorityClassName": "system-cluster-critical",
 				"hostip":            "5.6.7.8",
 			},
-		},
-	))
-	require.NoError(t, err)
-	if !assert.Len(t, v.Failures, 1) ||
-		!assert.Equal(t, &ValidationError{
+		}...)
+		expectedFailures = append(expectedFailures, &ValidationError{
 			Kind:    "Node",
 			Name:    "master-1b",
-			Message: "master \"master-1b\" is missing kube-controller-manager pod",
-		}, v.Failures[0]) {
+			Message: "master \"master-1b\" is missing " + pod + " pod",
+		})
+	}
+
+	v, err := testValidate(t, groups, makePodList(podList))
+	require.NoError(t, err)
+	if !assert.ElementsMatch(t, v.Failures, expectedFailures) {
 		printDebug(t, v)
 	}
 }

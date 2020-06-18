@@ -86,26 +86,21 @@ var _ fi.HasDependencies = &File{}
 func (e *File) GetDependencies(tasks map[string]fi.Task) []fi.Task {
 	var deps []fi.Task
 	if e.Owner != nil {
-		ownerTask := tasks["user/"+*e.Owner]
+		ownerTask := tasks["UserTask/"+*e.Owner]
 		if ownerTask == nil {
 			// The user might be a pre-existing user (e.g. admin)
-			klog.Warningf("Unable to find task %q", "user/"+*e.Owner)
+			klog.Warningf("Unable to find task %q", "UserTask/"+*e.Owner)
 		} else {
 			deps = append(deps, ownerTask)
 		}
 	}
 
-	// Depend on disk mounts
-	// For simplicity, we just depend on _all_ disk mounts
-	// We could check the mountpath, but that feels excessive...
-	for _, v := range tasks {
-		if _, ok := v.(*MountDiskTask); ok {
-			deps = append(deps, v)
-		}
-	}
-
 	// Requires parent directories to be created
 	deps = append(deps, findCreatesDirParents(e.Path, tasks)...)
+
+	if hasDep, ok := e.Contents.(fi.HasDependencies); ok {
+		deps = append(deps, hasDep.GetDependencies(tasks)...)
+	}
 
 	// Requires other files to be created first
 	for _, f := range e.AfterFiles {
@@ -125,10 +120,6 @@ var _ fi.HasName = &File{}
 
 func (f *File) GetName() *string {
 	return &f.Path
-}
-
-func (f *File) SetName(name string) {
-	klog.Fatalf("SetName not supported for File task")
 }
 
 func (f *File) String() string {
@@ -158,7 +149,7 @@ func findFile(p string) (*File, error) {
 	actual.Mode = fi.String(fi.FileModeToString(stat.Mode() & os.ModePerm))
 
 	uid := int(stat.Sys().(*syscall.Stat_t).Uid)
-	owner, err := fi.LookupUserById(uid)
+	owner, err := fi.LookupUserByID(uid)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +160,7 @@ func findFile(p string) (*File, error) {
 	}
 
 	gid := int(stat.Sys().(*syscall.Stat_t).Gid)
-	group, err := fi.LookupGroupById(gid)
+	group, err := fi.LookupGroupByID(gid)
 	if err != nil {
 		return nil, err
 	}

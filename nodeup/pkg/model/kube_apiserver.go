@@ -26,6 +26,7 @@ import (
 	"k8s.io/kops/pkg/k8scodecs"
 	"k8s.io/kops/pkg/kubeconfig"
 	"k8s.io/kops/pkg/kubemanifest"
+	"k8s.io/kops/pkg/wellknownports"
 	"k8s.io/kops/pkg/wellknownusers"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
@@ -100,13 +101,24 @@ func (b *KubeAPIServerBuilder) Build(c *fi.ModelBuilderContext) error {
 		})
 	}
 
-	// @check if we are using secure client certificates for kubelet and grab the certificates
-	if b.UseSecureKubelet() {
-		name := "kubelet-api"
-		if err := b.BuildCertificateTask(c, name, name+".pem"); err != nil {
+	// If we're using kube-apiserver-healthcheck, we need to set up the client cert etc
+	if b.findHealthcheckManifest() != nil {
+		if err := b.addHealthcheckSidecarTasks(c); err != nil {
 			return err
 		}
-		if err := b.BuildPrivateKeyTask(c, name, name+"-key.pem"); err != nil {
+	}
+
+	// @check if we are using secure client certificates for kubelet and grab the certificates
+	if b.UseSecureKubelet() {
+		issueCert := &nodetasks.IssueCert{
+			Name:    "kubelet-api",
+			Signer:  fi.CertificateIDCA,
+			Type:    "client",
+			Subject: nodetasks.PKIXName{CommonName: "kubelet-api"},
+		}
+		c.AddTask(issueCert)
+		err := issueCert.AddFileTasks(c, b.PathSrvKubernetes(), "kubelet-api", "", nil)
+		if err != nil {
 			return err
 		}
 	}
@@ -172,12 +184,12 @@ func (b *KubeAPIServerBuilder) writeAuthenticationConfig(c *fi.ModelBuilderConte
 		b.Cluster.Spec.KubeAPIServer.AuthenticationTokenWebhookConfigFile = fi.String(PathAuthnConfig)
 
 		{
-			caCertificate, err := b.NodeupModelContext.KeyStore.FindCert(fi.CertificateId_CA)
+			caCertificate, err := b.NodeupModelContext.KeyStore.FindCert(fi.CertificateIDCA)
 			if err != nil {
 				return fmt.Errorf("error fetching AWS IAM Authentication CA certificate from keystore: %v", err)
 			}
 			if caCertificate == nil {
-				return fmt.Errorf("AWS IAM  Authentication CA certificate %q not found", fi.CertificateId_CA)
+				return fmt.Errorf("AWS IAM  Authentication CA certificate %q not found", fi.CertificateIDCA)
 			}
 
 			cluster := kubeconfig.KubectlCluster{
@@ -292,11 +304,11 @@ func (b *KubeAPIServerBuilder) buildPod() (*v1.Pod, error) {
 	kubeAPIServer.ClientCAFile = filepath.Join(b.PathSrvKubernetes(), "ca.crt")
 	kubeAPIServer.TLSCertFile = filepath.Join(b.PathSrvKubernetes(), "server.cert")
 	kubeAPIServer.TLSPrivateKeyFile = filepath.Join(b.PathSrvKubernetes(), "server.key")
-	kubeAPIServer.TokenAuthFile = filepath.Join(b.PathSrvKubernetes(), "known_tokens.csv")
 
 	// Support for basic auth was deprecated 1.16 and removed in 1.19
 	// https://github.com/kubernetes/kubernetes/pull/89069
 	if b.IsKubernetesLT("1.18") {
+		kubeAPIServer.TokenAuthFile = filepath.Join(b.PathSrvKubernetes(), "known_tokens.csv")
 		if kubeAPIServer.DisableBasicAuth == nil || !*kubeAPIServer.DisableBasicAuth {
 			kubeAPIServer.BasicAuthFile = filepath.Join(b.PathSrvKubernetes(), "basic_auth.csv")
 		}
@@ -324,8 +336,8 @@ func (b *KubeAPIServerBuilder) buildPod() (*v1.Pod, error) {
 	// @check if we are using secure kubelet client certificates
 	if b.UseSecureKubelet() {
 		// @note we are making assumption were using the ones created by the pki model, not custom defined ones
-		kubeAPIServer.KubeletClientCertificate = filepath.Join(b.PathSrvKubernetes(), "kubelet-api.pem")
-		kubeAPIServer.KubeletClientKey = filepath.Join(b.PathSrvKubernetes(), "kubelet-api-key.pem")
+		kubeAPIServer.KubeletClientCertificate = filepath.Join(b.PathSrvKubernetes(), "kubelet-api.crt")
+		kubeAPIServer.KubeletClientKey = filepath.Join(b.PathSrvKubernetes(), "kubelet-api.key")
 	}
 
 	{
@@ -352,7 +364,7 @@ func (b *KubeAPIServerBuilder) buildPod() (*v1.Pod, error) {
 	// most people will still have c.Spec.KubeAPIServer.AdmissionControl references into their configuration we need
 	// to fix up. A PR https://github.com/kubernetes/kops/pull/5221/ introduced the issue and since the command line
 	// flags are mutually exclusive the API refuses to come up.
-	if b.IsKubernetesGTE("1.10") {
+	{
 		// @note: note sure if this is the best place to put it, I could place into the validation.go which has the benefit of
 		// fixing up the manifests itself, but that feels VERY hacky
 		// @note: it's fine to use AdmissionControl here and it's not populated by the model, thus the only data could have come from the cluster spec
@@ -397,12 +409,16 @@ func (b *KubeAPIServerBuilder) buildPod() (*v1.Pod, error) {
 		},
 	}
 
+	useHealthcheckProxy := b.findHealthcheckManifest() != nil
+
 	probeAction := &v1.HTTPGetAction{
 		Host: "127.0.0.1",
 		Path: "/healthz",
-		Port: intstr.FromInt(8080),
+		Port: intstr.FromInt(wellknownports.KubeAPIServerHealthCheck),
 	}
-	if kubeAPIServer.InsecurePort != 0 {
+	if useHealthcheckProxy {
+		// kube-apiserver-healthcheck sidecar container runs on port 3990
+	} else if kubeAPIServer.InsecurePort != 0 {
 		probeAction.Port = intstr.FromInt(int(kubeAPIServer.InsecurePort))
 	} else if kubeAPIServer.SecurePort != 0 {
 		probeAction.Port = intstr.FromInt(int(kubeAPIServer.SecurePort))
@@ -431,17 +447,20 @@ func (b *KubeAPIServerBuilder) buildPod() (*v1.Pod, error) {
 				ContainerPort: b.Cluster.Spec.KubeAPIServer.SecurePort,
 				HostPort:      b.Cluster.Spec.KubeAPIServer.SecurePort,
 			},
-			{
-				Name:          "local",
-				ContainerPort: 8080,
-				HostPort:      8080,
-			},
 		},
 		Resources: v1.ResourceRequirements{
 			Requests: v1.ResourceList{
 				v1.ResourceCPU: requestCPU,
 			},
 		},
+	}
+
+	if kubeAPIServer.InsecurePort != 0 {
+		container.Ports = append(container.Ports, v1.ContainerPort{
+			Name:          "local",
+			ContainerPort: kubeAPIServer.InsecurePort,
+			HostPort:      kubeAPIServer.InsecurePort,
+		})
 	}
 
 	// Log both to docker and to the logfile
@@ -516,6 +535,12 @@ func (b *KubeAPIServerBuilder) buildPod() (*v1.Pod, error) {
 
 	kubemanifest.MarkPodAsCritical(pod)
 	kubemanifest.MarkPodAsClusterCritical(pod)
+
+	if useHealthcheckProxy {
+		if err := b.addHealthcheckSidecar(pod); err != nil {
+			return nil, err
+		}
+	}
 
 	return pod, nil
 }

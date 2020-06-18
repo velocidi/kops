@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
 	"k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/pkg/apis/kops/util"
 	"k8s.io/kops/pkg/dns"
 	"k8s.io/kops/upup/pkg/fi"
 )
@@ -88,7 +89,7 @@ func BuildKubecfg(cluster *kops.Cluster, keyStore fi.Keystore, secretStore fi.Se
 
 	// add the CA Cert to the kubeconfig only if we didn't specify a SSL cert for the LB
 	if cluster.Spec.API == nil || cluster.Spec.API.LoadBalancer == nil || cluster.Spec.API.LoadBalancer.SSLCertificate == "" {
-		cert, _, _, err := keyStore.FindKeypair(fi.CertificateId_CA)
+		cert, _, _, err := keyStore.FindKeypair(fi.CertificateIDCA)
 		if err != nil {
 			return nil, fmt.Errorf("error fetching CA keypair: %v", err)
 		}
@@ -127,7 +128,24 @@ func BuildKubecfg(cluster *kops.Cluster, keyStore fi.Keystore, secretStore fi.Se
 
 	b.Server = server
 
-	if secretStore != nil {
+	k8sVersion, err := util.ParseKubernetesVersion(cluster.Spec.KubernetesVersion)
+	if err != nil || k8sVersion == nil {
+		klog.Warningf("unable to parse KubernetesVersion %q", cluster.Spec.KubernetesVersion)
+		k8sVersion, _ = util.ParseKubernetesVersion("1.0.0")
+	}
+
+	basicAuthEnabled := false
+	if !util.IsKubernetesGTE("1.18", *k8sVersion) {
+		if cluster.Spec.KubeAPIServer == nil || cluster.Spec.KubeAPIServer.DisableBasicAuth == nil || !*cluster.Spec.KubeAPIServer.DisableBasicAuth {
+			basicAuthEnabled = true
+		}
+	} else if !util.IsKubernetesGTE("1.19", *k8sVersion) {
+		if cluster.Spec.KubeAPIServer != nil && cluster.Spec.KubeAPIServer.DisableBasicAuth != nil && !*cluster.Spec.KubeAPIServer.DisableBasicAuth {
+			basicAuthEnabled = true
+		}
+	}
+
+	if basicAuthEnabled && secretStore != nil {
 		secret, err := secretStore.FindSecret("kube")
 		if err != nil {
 			return nil, err

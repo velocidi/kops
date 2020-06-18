@@ -17,6 +17,7 @@ limitations under the License.
 package cloudup
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -34,7 +35,7 @@ import (
 )
 
 const (
-	// This IP is from TEST-NET-3
+	// PlaceholderIP is from TEST-NET-3
 	// https://en.wikipedia.org/wiki/Reserved_IP_addresses
 	PlaceholderIP  = "203.0.113.123"
 	PlaceholderTTL = 10
@@ -110,9 +111,8 @@ func validateDNS(cluster *kops.Cluster, cloud fi.Cloud) error {
 	if len(ns) == 0 {
 		if os.Getenv("DNS_IGNORE_NS_CHECK") == "" {
 			return fmt.Errorf("NS records not found for %q - please make sure they are correctly configured", dnsName)
-		} else {
-			klog.Warningf("Ignoring failed NS record check because DNS_IGNORE_NS_CHECK is set")
 		}
+		klog.Warningf("Ignoring failed NS record check because DNS_IGNORE_NS_CHECK is set")
 	} else {
 		var hosts []string
 		for _, n := range ns {
@@ -124,7 +124,7 @@ func validateDNS(cluster *kops.Cluster, cloud fi.Cloud) error {
 	return nil
 }
 
-func precreateDNS(cluster *kops.Cluster, cloud fi.Cloud) error {
+func precreateDNS(ctx context.Context, cluster *kops.Cluster, cloud fi.Cloud) error {
 	// TODO: Move to update
 	if !featureflag.DNSPreCreate.Enabled() {
 		klog.V(4).Infof("Skipping DNS record pre-creation because feature flag not enabled")
@@ -165,21 +165,17 @@ func precreateDNS(cluster *kops.Cluster, cloud fi.Cloud) error {
 	}
 
 	recordsMap := make(map[string]dnsprovider.ResourceRecordSet)
-	// vSphere provider uses CoreDNS, which doesn't have rrs.List() function supported.
-	// Thus we use rrs.Get() to check every dnsHostname instead
-	if cloud.ProviderID() != kops.CloudProviderVSphere {
-		// TODO: We should change the filter to be a suffix match instead
-		//records, err := rrs.List("", "")
-		records, err := rrs.List()
-		if err != nil {
-			return fmt.Errorf("error listing DNS resource records for %q: %v", zone.Name(), err)
-		}
+	// TODO: We should change the filter to be a suffix match instead
+	//records, err := rrs.List("", "")
+	records, err := rrs.List()
+	if err != nil {
+		return fmt.Errorf("error listing DNS resource records for %q: %v", zone.Name(), err)
+	}
 
-		for _, record := range records {
-			name := dns.EnsureDotSuffix(record.Name())
-			key := string(record.Type()) + "::" + name
-			recordsMap[key] = record
-		}
+	for _, record := range records {
+		name := dns.EnsureDotSuffix(record.Name())
+		key := string(record.Type()) + "::" + name
+		recordsMap[key] = record
 	}
 
 	changeset := rrs.StartChangeset()
@@ -189,38 +185,16 @@ func precreateDNS(cluster *kops.Cluster, cloud fi.Cloud) error {
 	for _, dnsHostname := range dnsHostnames {
 		dnsHostname = dns.EnsureDotSuffix(dnsHostname)
 		found := false
-		if cloud.ProviderID() != kops.CloudProviderVSphere {
-			dnsRecord := recordsMap["A::"+dnsHostname]
-			if dnsRecord != nil {
-				rrdatas := dnsRecord.Rrdatas()
-				if len(rrdatas) > 0 {
-					klog.V(4).Infof("Found DNS record %s => %s; won't create", dnsHostname, rrdatas)
-					found = true
-				} else {
-					// This is probably an alias target; leave it alone...
-					klog.V(4).Infof("Found DNS record %s, but no records", dnsHostname)
-					found = true
-				}
-			}
-		} else {
-			dnsRecords, err := rrs.Get(dnsHostname)
-			if err != nil {
-				return fmt.Errorf("failed to get DNS record %s with error: %v", dnsHostname, err)
-			}
-			for _, dnsRecord := range dnsRecords {
-				if dnsRecord.Type() != "A" {
-					klog.V(4).Infof("Found DNS record %s with type %s, continue to create A type", dnsHostname, dnsRecord.Type())
-				} else {
-					rrdatas := dnsRecord.Rrdatas()
-					if len(rrdatas) > 0 {
-						klog.V(4).Infof("Found DNS record %s => %s; won't create", dnsHostname, rrdatas)
-						found = true
-					} else {
-						// This is probably an alias target; leave it alone...
-						klog.V(4).Infof("Found DNS record %s, but no records", dnsHostname)
-						found = true
-					}
-				}
+		dnsRecord := recordsMap["A::"+dnsHostname]
+		if dnsRecord != nil {
+			rrdatas := dnsRecord.Rrdatas()
+			if len(rrdatas) > 0 {
+				klog.V(4).Infof("Found DNS record %s => %s; won't create", dnsHostname, rrdatas)
+				found = true
+			} else {
+				// This is probably an alias target; leave it alone...
+				klog.V(4).Infof("Found DNS record %s, but no records", dnsHostname)
+				found = true
 			}
 		}
 
@@ -240,7 +214,7 @@ func precreateDNS(cluster *kops.Cluster, cloud fi.Cloud) error {
 	}
 
 	if len(created) != 0 {
-		err := changeset.Apply()
+		err := changeset.Apply(ctx)
 		if err != nil {
 			return fmt.Errorf("error pre-creating DNS records: %v", err)
 		}

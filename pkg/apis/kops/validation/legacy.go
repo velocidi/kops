@@ -19,18 +19,13 @@ package validation
 import (
 	"fmt"
 	"net"
-	"strings"
 
-	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/util"
 	"k8s.io/kops/pkg/featureflag"
-	"k8s.io/kops/pkg/model/components"
 	"k8s.io/kops/pkg/util/subnet"
 	"k8s.io/kops/upup/pkg/fi"
-
-	"github.com/blang/semver"
 )
 
 // legacy contains validation functions that don't match the apimachinery style
@@ -51,25 +46,6 @@ func ValidateCluster(c *kops.Cluster, strict bool) field.ErrorList {
 		return allErrs
 	}
 
-	if c.ObjectMeta.Name == "" {
-		allErrs = append(allErrs, field.Required(field.NewPath("objectMeta", "name"), "Cluster Name is required (e.g. --name=mycluster.myzone.com)"))
-	} else {
-		// Must be a dns name
-		errs := validation.IsDNS1123Subdomain(c.ObjectMeta.Name)
-		if len(errs) != 0 {
-			allErrs = append(allErrs, field.Invalid(field.NewPath("objectMeta", "name"), c.ObjectMeta.Name, fmt.Sprintf("Cluster Name must be a valid DNS name (e.g. --name=mycluster.myzone.com) errors: %s", strings.Join(errs, ", "))))
-		} else if !strings.Contains(c.ObjectMeta.Name, ".") {
-			// Tolerate if this is a cluster we are importing for upgrade
-			if c.ObjectMeta.Annotations[kops.AnnotationNameManagement] != kops.AnnotationValueManagementImported {
-				allErrs = append(allErrs, field.Invalid(field.NewPath("objectMeta", "name"), c.ObjectMeta.Name, "Cluster Name must be a fully-qualified DNS name (e.g. --name=mycluster.myzone.com)"))
-			}
-		}
-	}
-
-	if c.Spec.Assets != nil && c.Spec.Assets.ContainerProxy != nil && c.Spec.Assets.ContainerRegistry != nil {
-		allErrs = append(allErrs, field.Forbidden(fieldSpec.Child("Assets", "ContainerProxy"), "ContainerProxy cannot be used in conjunction with ContainerRegistry as represent mutually exclusive concepts. Please consult the documentation for details."))
-	}
-
 	requiresSubnets := true
 	requiresNetworkCIDR := true
 	requiresSubnetCIDR := true
@@ -79,14 +55,6 @@ func ValidateCluster(c *kops.Cluster, strict bool) field.ErrorList {
 		requiresSubnets = false
 		requiresSubnetCIDR = false
 		requiresNetworkCIDR = false
-
-	case kops.CloudProviderBareMetal:
-		requiresSubnets = false
-		requiresSubnetCIDR = false
-		requiresNetworkCIDR = false
-		if c.Spec.NetworkCIDR != "" {
-			allErrs = append(allErrs, field.Forbidden(fieldSpec.Child("networkCIDR"), "networkCIDR should not be set on bare metal"))
-		}
 
 	case kops.CloudProviderGCE:
 		requiresNetworkCIDR = false
@@ -107,19 +75,16 @@ func ValidateCluster(c *kops.Cluster, strict bool) field.ErrorList {
 		requiresSubnetCIDR = false
 		requiresNetworkCIDR = false
 	case kops.CloudProviderAWS:
-	case kops.CloudProviderVSphere:
 	case kops.CloudProviderOpenstack:
 		requiresNetworkCIDR = false
 		requiresSubnetCIDR = false
 
 	default:
 		allErrs = append(allErrs, field.NotSupported(fieldSpec.Child("cloudProvider"), c.Spec.CloudProvider, []string{
-			string(kops.CloudProviderBareMetal),
 			string(kops.CloudProviderGCE),
 			string(kops.CloudProviderDO),
 			string(kops.CloudProviderALI),
 			string(kops.CloudProviderAWS),
-			string(kops.CloudProviderVSphere),
 			string(kops.CloudProviderOpenstack),
 		}))
 	}
@@ -327,10 +292,6 @@ func ValidateCluster(c *kops.Cluster, strict bool) field.ErrorList {
 			k8sCloudProvider = "gce"
 		case kops.CloudProviderDO:
 			k8sCloudProvider = "external"
-		case kops.CloudProviderVSphere:
-			k8sCloudProvider = "vsphere"
-		case kops.CloudProviderBareMetal:
-			k8sCloudProvider = ""
 		case kops.CloudProviderOpenstack:
 			k8sCloudProvider = "openstack"
 		case kops.CloudProviderALI:
@@ -383,133 +344,6 @@ func ValidateCluster(c *kops.Cluster, strict bool) field.ErrorList {
 		}
 	}
 
-	// NodeAuthorization
-	if c.Spec.NodeAuthorization != nil {
-		// @check the feature gate is enabled for this
-		if !featureflag.EnableNodeAuthorization.Enabled() {
-			allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "nodeAuthorization"), "node authorization is experimental feature; set `export KOPS_FEATURE_FLAGS=EnableNodeAuthorization`"))
-		} else {
-			if c.Spec.NodeAuthorization.NodeAuthorizer == nil {
-				allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "nodeAuthorization"), "no node authorization policy has been set"))
-			} else {
-				path := field.NewPath("spec", "nodeAuthorization").Child("nodeAuthorizer")
-				if c.Spec.NodeAuthorization.NodeAuthorizer.Port < 0 || c.Spec.NodeAuthorization.NodeAuthorizer.Port >= 65535 {
-					allErrs = append(allErrs, field.Invalid(path.Child("port"), c.Spec.NodeAuthorization.NodeAuthorizer.Port, "invalid port"))
-				}
-				if c.Spec.NodeAuthorization.NodeAuthorizer.Timeout != nil && c.Spec.NodeAuthorization.NodeAuthorizer.Timeout.Duration <= 0 {
-					allErrs = append(allErrs, field.Invalid(path.Child("timeout"), c.Spec.NodeAuthorization.NodeAuthorizer.Timeout, "must be greater than zero"))
-				}
-				if c.Spec.NodeAuthorization.NodeAuthorizer.TokenTTL != nil && c.Spec.NodeAuthorization.NodeAuthorizer.TokenTTL.Duration < 0 {
-					allErrs = append(allErrs, field.Invalid(path.Child("tokenTTL"), c.Spec.NodeAuthorization.NodeAuthorizer.TokenTTL, "must be greater than or equal to zero"))
-				}
-
-				// @question: we could probably just default these settings in the model when the node-authorizer is enabled??
-				if c.Spec.KubeAPIServer == nil {
-					allErrs = append(allErrs, field.Required(field.NewPath("spec", "kubeAPIServer"), "bootstrap token authentication is not enabled in the kube-apiserver"))
-				} else if c.Spec.KubeAPIServer.EnableBootstrapAuthToken == nil {
-					allErrs = append(allErrs, field.Required(field.NewPath("spec", "kubeAPIServer", "enableBootstrapAuthToken"), "kube-apiserver has not been configured to use bootstrap tokens"))
-				} else if !fi.BoolValue(c.Spec.KubeAPIServer.EnableBootstrapAuthToken) {
-					allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "kubeAPIServer", "enableBootstrapAuthToken"), "bootstrap tokens in the kube-apiserver has been disabled"))
-				}
-			}
-		}
-	}
-
-	// UpdatePolicy
-	if c.Spec.UpdatePolicy != nil {
-		switch *c.Spec.UpdatePolicy {
-		case kops.UpdatePolicyExternal:
-		// Valid
-		default:
-			allErrs = append(allErrs, field.NotSupported(fieldSpec.Child("updatePolicy"), *c.Spec.UpdatePolicy, []string{kops.UpdatePolicyExternal}))
-		}
-	}
-
-	// KubeProxy
-	if c.Spec.KubeProxy != nil {
-		kubeProxyPath := fieldSpec.Child("kubeProxy")
-		master := c.Spec.KubeProxy.Master
-
-		for i, x := range c.Spec.KubeProxy.IPVSExcludeCIDRS {
-			if _, _, err := net.ParseCIDR(x); err != nil {
-				allErrs = append(allErrs, field.Invalid(kubeProxyPath.Child("ipvsExcludeCidrs").Index(i), x, "Invalid network CIDR"))
-			}
-		}
-
-		if master != "" && !isValidAPIServersURL(master) {
-			allErrs = append(allErrs, field.Invalid(kubeProxyPath.Child("master"), master, "Not a valid APIServer URL"))
-		}
-	}
-
-	// KubeAPIServer
-	if c.Spec.KubeAPIServer != nil {
-		if c.IsKubernetesGTE("1.10") {
-			if len(c.Spec.KubeAPIServer.AdmissionControl) > 0 {
-				if len(c.Spec.KubeAPIServer.DisableAdmissionPlugins) > 0 {
-					allErrs = append(allErrs, field.Forbidden(fieldSpec.Child("kubeAPIServer", "disableAdmissionPlugins"),
-						"disableAdmissionPlugins is mutually exclusive, you cannot use both admissionControl and disableAdmissionPlugins together"))
-				}
-			}
-		}
-	}
-
-	// Kubelet
-	allErrs = append(allErrs, validateKubelet(c.Spec.Kubelet, c, fieldSpec.Child("kubelet"))...)
-	allErrs = append(allErrs, validateKubelet(c.Spec.MasterKubelet, c, fieldSpec.Child("masterKubelet"))...)
-
-	// Topology support
-	if c.Spec.Topology != nil {
-		if c.Spec.Topology.Masters != "" && c.Spec.Topology.Nodes != "" {
-			allErrs = append(allErrs, IsValidValue(fieldSpec.Child("topology", "masters"), &c.Spec.Topology.Masters, kops.SupportedTopologies)...)
-			allErrs = append(allErrs, IsValidValue(fieldSpec.Child("topology", "nodes"), &c.Spec.Topology.Nodes, kops.SupportedTopologies)...)
-		} else {
-			allErrs = append(allErrs, field.Required(fieldSpec.Child("masters"), "topology requires non-nil values for masters and nodes"))
-		}
-		if c.Spec.Topology.Bastion != nil {
-			bastion := c.Spec.Topology.Bastion
-			if c.Spec.Topology.Masters == kops.TopologyPublic || c.Spec.Topology.Nodes == kops.TopologyPublic {
-				allErrs = append(allErrs, field.Forbidden(fieldSpec.Child("topology", "bastion"), "bastion requires masters and nodes to have private topology"))
-			}
-			if bastion.IdleTimeoutSeconds != nil && *bastion.IdleTimeoutSeconds <= 0 {
-				allErrs = append(allErrs, field.Invalid(fieldSpec.Child("topology", "bastion", "idleTimeoutSeconds"), *bastion.IdleTimeoutSeconds, "bastion idleTimeoutSeconds should be greater than zero"))
-			}
-			if bastion.IdleTimeoutSeconds != nil && *bastion.IdleTimeoutSeconds > 3600 {
-				allErrs = append(allErrs, field.Invalid(fieldSpec.Child("topology", "bastion", "idleTimeoutSeconds"), *bastion.IdleTimeoutSeconds, "bastion idleTimeoutSeconds cannot be greater than one hour"))
-			}
-
-		}
-	}
-	// Egress specification support
-	{
-		for i, s := range c.Spec.Subnets {
-			if s.Egress == "" {
-				continue
-			}
-			fieldSubnet := fieldSpec.Child("subnets").Index(i)
-			if !strings.HasPrefix(s.Egress, "nat-") && !strings.HasPrefix(s.Egress, "i-") && s.Egress != kops.EgressExternal {
-				allErrs = append(allErrs, field.Invalid(fieldSubnet.Child("egress"), s.Egress, "egress must be of type NAT Gateway or NAT EC2 Instance or 'External'"))
-			}
-			if s.Egress != kops.EgressExternal && s.Type != "Private" {
-				allErrs = append(allErrs, field.Forbidden(fieldSubnet.Child("egress"), "egress can only be specified for private subnets"))
-			}
-		}
-	}
-
-	// Etcd
-	{
-		fieldEtcdClusters := fieldSpec.Child("etcdClusters")
-
-		if len(c.Spec.EtcdClusters) == 0 {
-			allErrs = append(allErrs, field.Required(fieldEtcdClusters, ""))
-		} else {
-			for i, x := range c.Spec.EtcdClusters {
-				allErrs = append(allErrs, validateEtcdClusterSpecLegacy(x, fieldEtcdClusters.Index(i))...)
-			}
-			allErrs = append(allErrs, validateEtcdTLS(c.Spec.EtcdClusters, fieldEtcdClusters)...)
-			allErrs = append(allErrs, validateEtcdStorage(c.Spec.EtcdClusters, fieldEtcdClusters)...)
-		}
-	}
-
 	allErrs = append(allErrs, newValidateCluster(c)...)
 
 	return allErrs
@@ -530,103 +364,8 @@ func validateSubnetCIDR(networkCIDR *net.IPNet, additionalNetworkCIDRs []*net.IP
 	return false
 }
 
-// validateEtcdClusterSpecLegacy is responsible for validating the etcd cluster spec
-func validateEtcdClusterSpecLegacy(spec *kops.EtcdClusterSpec, fieldPath *field.Path) field.ErrorList {
-	allErrs := field.ErrorList{}
-	if spec.Name == "" {
-		allErrs = append(allErrs, field.Required(fieldPath.Child("name"), "etcdCluster did not have name"))
-	}
-	if len(spec.Members) == 0 {
-		allErrs = append(allErrs, field.Required(fieldPath.Child("members"), "No members defined in etcd cluster"))
-	} else if (len(spec.Members) % 2) == 0 {
-		// Not technically a requirement, but doesn't really make sense to allow
-		allErrs = append(allErrs, field.Invalid(fieldPath.Child("members"), len(spec.Members), "Should be an odd number of master-zones for quorum. Use --zones and --master-zones to declare node zones and master zones separately"))
-	}
-	allErrs = append(allErrs, validateEtcdVersion(spec, fieldPath, nil)...)
-	for _, m := range spec.Members {
-		allErrs = append(allErrs, validateEtcdMemberSpec(m, fieldPath)...)
-	}
-
-	return allErrs
-}
-
-// validateEtcdTLS checks the TLS settings for etcd are valid
-func validateEtcdTLS(specs []*kops.EtcdClusterSpec, fieldPath *field.Path) field.ErrorList {
-	allErrs := field.ErrorList{}
-	var usingTLS int
-	for _, x := range specs {
-		if x.EnableEtcdTLS {
-			usingTLS++
-		}
-	}
-	// check both clusters are using tls if one is enabled
-	if usingTLS > 0 && usingTLS != len(specs) {
-		allErrs = append(allErrs, field.Forbidden(fieldPath.Index(0).Child("enableEtcdTLS"), "both etcd clusters must have TLS enabled or none at all"))
-	}
-
-	return allErrs
-}
-
-// validateEtcdStorage is responsible for checking versions are identical.
-func validateEtcdStorage(specs []*kops.EtcdClusterSpec, fieldPath *field.Path) field.ErrorList {
-	allErrs := field.ErrorList{}
-	version := specs[0].Version
-	for i, x := range specs {
-		if x.Version != "" && x.Version != version {
-			allErrs = append(allErrs, field.Forbidden(fieldPath.Index(i).Child("version"), fmt.Sprintf("cluster: %q, has a different storage version: %q, both must be the same", x.Name, x.Version)))
-		}
-	}
-
-	return allErrs
-}
-
-// validateEtcdVersion is responsible for validating the storage version of etcd
-// @TODO semvar package doesn't appear to ignore a 'v' in v1.1.1; could be a problem later down the line
-func validateEtcdVersion(spec *kops.EtcdClusterSpec, fieldPath *field.Path, minimalVersion *semver.Version) field.ErrorList {
-	// @check if the storage is specified that it's valid
-
-	if minimalVersion == nil {
-		v := semver.MustParse("0.0.0")
-		minimalVersion = &v
-	}
-
-	version := spec.Version
-	if spec.Version == "" {
-		version = components.DefaultEtcd2Version
-	}
-
-	sem, err := semver.Parse(strings.TrimPrefix(version, "v"))
-	if err != nil {
-		return field.ErrorList{field.Invalid(fieldPath.Child("version"), version, "the storage version is invalid")}
-	}
-
-	// we only support v3 and v2 for now
-	if sem.Major == 3 || sem.Major == 2 {
-		if sem.LT(*minimalVersion) {
-			return field.ErrorList{field.Invalid(fieldPath.Child("version"), version, fmt.Sprintf("minimum version required is %s", minimalVersion.String()))}
-		}
-		return nil
-	}
-
-	return field.ErrorList{field.Invalid(fieldPath.Child("version"), version, "unsupported storage version, we only support major versions 2 and 3")}
-}
-
-// validateEtcdMemberSpec is responsible for validate the cluster member
-func validateEtcdMemberSpec(spec *kops.EtcdMemberSpec, fieldPath *field.Path) field.ErrorList {
-	allErrs := field.ErrorList{}
-	if spec.Name == "" {
-		allErrs = append(allErrs, field.Required(fieldPath.Child("name"), "etcdMember did not have name"))
-	}
-
-	if fi.StringValue(spec.InstanceGroup) == "" {
-		allErrs = append(allErrs, field.Required(fieldPath.Child("instanceGroup"), "etcdMember did not have instanceGroup"))
-	}
-
-	return allErrs
-}
-
 // DeepValidate is responsible for validating the instancegroups within the cluster spec
-func DeepValidate(c *kops.Cluster, groups []*kops.InstanceGroup, strict bool) error {
+func DeepValidate(c *kops.Cluster, groups []*kops.InstanceGroup, strict bool, cloud fi.Cloud) error {
 	if errs := ValidateCluster(c, strict); len(errs) != 0 {
 		return errs.ToAggregate()
 	}
@@ -654,17 +393,11 @@ func DeepValidate(c *kops.Cluster, groups []*kops.InstanceGroup, strict bool) er
 	}
 
 	for _, g := range groups {
-		errs := CrossValidateInstanceGroup(g, c, strict)
+		errs := CrossValidateInstanceGroup(g, c, cloud)
 
-		// Additional cloud-specific validation rules,
-		// such as making sure that identifiers match the expected formats for the given cloud
-		switch kops.CloudProviderID(c.Spec.CloudProvider) {
-		case kops.CloudProviderAWS:
-			errs = append(errs, awsValidateInstanceGroup(g)...)
-		default:
-			if len(g.Spec.Volumes) > 0 {
-				errs = append(errs, field.Forbidden(field.NewPath("spec", "volumes"), "instancegroup volumes are only available with aws at present"))
-			}
+		// Additional cloud-specific validation rules
+		if kops.CloudProviderID(c.Spec.CloudProvider) != kops.CloudProviderAWS && len(g.Spec.Volumes) > 0 {
+			errs = append(errs, field.Forbidden(field.NewPath("spec", "volumes"), "instancegroup volumes are only available with aws at present"))
 		}
 
 		if len(errs) != 0 {
@@ -673,46 +406,6 @@ func DeepValidate(c *kops.Cluster, groups []*kops.InstanceGroup, strict bool) er
 	}
 
 	return nil
-}
-
-func validateKubelet(k *kops.KubeletConfigSpec, c *kops.Cluster, kubeletPath *field.Path) field.ErrorList {
-	allErrs := field.ErrorList{}
-
-	if k != nil {
-
-		{
-			// Flag removed in 1.6
-			if k.APIServers != "" {
-				allErrs = append(allErrs, field.Forbidden(
-					kubeletPath.Child("apiServers"),
-					"api-servers flag was removed in 1.6"))
-			}
-		}
-
-		if c.IsKubernetesGTE("1.10") {
-			// Flag removed in 1.10
-			if k.RequireKubeconfig != nil {
-				allErrs = append(allErrs, field.Forbidden(
-					kubeletPath.Child("requireKubeconfig"),
-					"require-kubeconfig flag was removed in 1.10.  (Please be sure you are not using a cluster config from `kops get cluster --full`)"))
-			}
-		}
-
-		if k.BootstrapKubeconfig != "" {
-			if c.Spec.KubeAPIServer == nil {
-				allErrs = append(allErrs, field.Required(kubeletPath.Root().Child("spec").Child("kubeAPIServer"), "bootstrap token require the NodeRestriction admissions controller"))
-			}
-		}
-
-		if k.TopologyManagerPolicy != "" {
-			allErrs = append(allErrs, IsValidValue(kubeletPath.Child("topologyManagerPolicy"), &k.TopologyManagerPolicy, []string{"none", "best-effort", "restricted", "single-numa-node"})...)
-			if !c.IsKubernetesGTE("1.18") {
-				allErrs = append(allErrs, field.Forbidden(kubeletPath.Child("topologyManagerPolicy"), "topologyManagerPolicy requires at least Kubernetes 1.18"))
-			}
-		}
-
-	}
-	return allErrs
 }
 
 func isExperimentalClusterDNS(k *kops.KubeletConfigSpec, dns *kops.KubeDNSConfig) bool {

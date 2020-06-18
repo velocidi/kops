@@ -17,16 +17,10 @@ limitations under the License.
 package model
 
 import (
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"fmt"
-	"os"
-	"path/filepath"
-	"time"
 
-	"k8s.io/klog"
-	"k8s.io/kops/pkg/pki"
 	"k8s.io/kops/upup/pkg/fi"
+	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
 )
 
 // EtcdManagerTLSBuilder configures TLS support for etcd-manager
@@ -38,7 +32,7 @@ var _ fi.ModelBuilder = &EtcdManagerTLSBuilder{}
 
 // Build is responsible for TLS configuration for etcd-manager
 func (b *EtcdManagerTLSBuilder) Build(ctx *fi.ModelBuilderContext) error {
-	if !b.IsMaster {
+	if !b.IsMaster || !b.UseEtcdManager() {
 		return nil
 	}
 
@@ -57,8 +51,7 @@ func (b *EtcdManagerTLSBuilder) Build(ctx *fi.ModelBuilderContext) error {
 				return err
 			}
 			if cert == nil {
-				klog.Warningf("keypair %q not found, won't configure", keystoreName)
-				continue
+				return fmt.Errorf("keypair %q not found", keystoreName)
 			}
 
 			if err := b.BuildCertificateTask(ctx, keystoreName, d+"/"+fileName+".crt"); err != nil {
@@ -71,79 +64,22 @@ func (b *EtcdManagerTLSBuilder) Build(ctx *fi.ModelBuilderContext) error {
 	}
 
 	// We also dynamically generate the client keypair for apiserver
-	if err := b.buildKubeAPIServerKeypair(); err != nil {
+	if err := b.buildKubeAPIServerKeypair(ctx); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (b *EtcdManagerTLSBuilder) buildKubeAPIServerKeypair() error {
-	etcdClientsCACertificate, err := b.KeyStore.FindCert("etcd-clients-ca")
-	if err != nil {
-		return err
-	}
-
-	etcdClientsCAPrivateKey, err := b.KeyStore.FindPrivateKey("etcd-clients-ca")
-	if err != nil {
-		return err
-	}
-
-	if etcdClientsCACertificate == nil {
-		klog.Errorf("unable to find etcd-clients-ca certificate, won't build key for apiserver")
-		return nil
-	}
-	if etcdClientsCAPrivateKey == nil {
-		klog.Errorf("unable to find etcd-clients-ca private key, won't build key for apiserver")
-		return nil
-	}
-
-	dir := "/etc/kubernetes/pki/kube-apiserver"
-
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("error creating directories %q: %v", dir, err)
-	}
-
-	{
-		p := filepath.Join(dir, "etcd-ca.crt")
-		if err := etcdClientsCACertificate.WriteToFile(p, 0644); err != nil {
-			return fmt.Errorf("error writing certificate key file %q: %v", p, err)
-		}
-	}
-
+func (b *EtcdManagerTLSBuilder) buildKubeAPIServerKeypair(c *fi.ModelBuilderContext) error {
 	name := "etcd-client"
-
-	humanName := dir + "/" + name
-	privateKey, err := pki.GeneratePrivateKey()
-	if err != nil {
-		return fmt.Errorf("unable to create private key %q: %v", humanName, err)
-	}
-
-	certTmpl := &x509.Certificate{
-		Subject: pkix.Name{
+	issueCert := &nodetasks.IssueCert{
+		Name:   name,
+		Signer: "etcd-clients-ca",
+		Type:   "client",
+		Subject: nodetasks.PKIXName{
 			CommonName: "kube-apiserver",
 		},
-		NotAfter:    time.Now().Add(time.Hour * 24 * 365).UTC(),
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}
-
-	klog.Infof("signing certificate for %q", humanName)
-	cert, err := pki.SignNewCertificate(privateKey, certTmpl, etcdClientsCACertificate.Certificate, etcdClientsCAPrivateKey)
-	if err != nil {
-		return fmt.Errorf("error signing certificate for %q: %v", humanName, err)
-	}
-
-	p := filepath.Join(dir, name)
-	{
-		if err := cert.WriteToFile(p+".crt", 0644); err != nil {
-			return fmt.Errorf("error writing certificate key file %q: %v", p+".crt", err)
-		}
-	}
-
-	{
-		if err := privateKey.WriteToFile(p+".key", 0600); err != nil {
-			return fmt.Errorf("error writing private key file %q: %v", p+".key", err)
-		}
-	}
-
-	return nil
+	c.AddTask(issueCert)
+	return issueCert.AddFileTasks(c, "/etc/kubernetes/pki/kube-apiserver", name, "etcd-ca", nil)
 }

@@ -96,11 +96,7 @@ func (l *Loader) Build(baseDir vfs.Path) (map[string]fi.Task, error) {
 	tw := &loader.TreeWalker{
 		DefaultHandler: ignoreHandler,
 		Contexts: map[string]loader.Handler{
-			"files":    ignoreHandler,
-			"disks":    ignoreHandler,
-			"packages": ignoreHandler,
-			"services": ignoreHandler,
-			"users":    ignoreHandler,
+			"files": ignoreHandler,
 		},
 		Tags: l.tags,
 	}
@@ -114,11 +110,7 @@ func (l *Loader) Build(baseDir vfs.Path) (map[string]fi.Task, error) {
 	tw = &loader.TreeWalker{
 		DefaultHandler: l.handleFile,
 		Contexts: map[string]loader.Handler{
-			"files":    l.handleFile,
-			"disks":    l.newTaskHandler("disk/", nodetasks.NewMountDiskTask),
-			"packages": l.newTaskHandler("package/", nodetasks.NewPackage),
-			"services": l.newTaskHandler("service/", nodetasks.NewService),
-			"users":    l.newTaskHandler("user/", nodetasks.NewUserTask),
+			"files": l.handleFile,
 		},
 		Tags: l.tags,
 	}
@@ -155,36 +147,6 @@ func (l *Loader) Build(baseDir vfs.Path) (map[string]fi.Task, error) {
 }
 
 type TaskBuilder func(name string, contents string, meta string) (fi.Task, error)
-
-func (l *Loader) newTaskHandler(prefix string, builder TaskBuilder) loader.Handler {
-	return func(i *loader.TreeWalkItem) error {
-		contents, err := i.ReadString()
-		if err != nil {
-			return err
-		}
-		name := i.Name
-		if strings.HasSuffix(name, ".template") {
-			name = strings.TrimSuffix(name, ".template")
-			expanded, err := l.executeTemplate(name, contents)
-			if err != nil {
-				return fmt.Errorf("error executing template %q: %v", i.RelativePath, err)
-			}
-
-			contents = expanded
-		}
-
-		task, err := builder(name, contents, i.Meta)
-		if err != nil {
-			return fmt.Errorf("error building %s for %q: %v", i.Name, i.Path, err)
-		}
-		key := prefix + i.RelativePath
-
-		if task != nil {
-			l.tasks[key] = task
-		}
-		return nil
-	}
-}
 
 func (l *Loader) handleFile(i *loader.TreeWalkItem) error {
 	var task *nodetasks.File

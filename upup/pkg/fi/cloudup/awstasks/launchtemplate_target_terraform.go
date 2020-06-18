@@ -19,6 +19,7 @@ package awstasks
 import (
 	"encoding/base64"
 
+	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
@@ -61,8 +62,8 @@ type terraformLaunchTemplateIAMProfile struct {
 type terraformLaunchTemplateMarketOptionsSpotOptions struct {
 	// BlockDurationMinutes is required duration in minutes. This value must be a multiple of 60.
 	BlockDurationMinutes *int64 `json:"block_duration_minutes,omitempty" cty:"block_duration_minutes"`
-	// InstancesInterruptionBehavior is the behavior when a Spot Instance is interrupted. Can be hibernate, stop, or terminate
-	InstancesInterruptionBehavior *string `json:"instances_interruption_behavior,omitempty" cty:"instances_interruption_behavior"`
+	// InstanceInterruptionBehavior is the behavior when a Spot Instance is interrupted. Can be hibernate, stop, or terminate
+	InstanceInterruptionBehavior *string `json:"instance_interruption_behavior,omitempty" cty:"instance_interruption_behavior"`
 	// MaxPrice is the maximum hourly price you're willing to pay for the Spot Instances
 	MaxPrice *string `json:"max_price,omitempty" cty:"max_price"`
 	// SpotInstanceType is the Spot Instance request type. Can be one-time, or persistent
@@ -183,6 +184,9 @@ func (t *LaunchTemplate) RenderTerraform(target *terraform.TerraformTarget, a, e
 		if e.SpotDurationInMinutes != nil {
 			marketSpotOptions.BlockDurationMinutes = e.SpotDurationInMinutes
 		}
+		if e.InstanceInterruptionBehavior != nil {
+			marketSpotOptions.InstanceInterruptionBehavior = e.InstanceInterruptionBehavior
+		}
 		tf.MarketOptions = []*terraformLaunchTemplateMarketOptions{
 			{
 				MarketType:  fi.String("spot"),
@@ -209,13 +213,23 @@ func (t *LaunchTemplate) RenderTerraform(target *terraform.TerraformTarget, a, e
 		if err != nil {
 			return err
 		}
-		b64d := base64.StdEncoding.EncodeToString(d)
-		if b64d != "" {
-			b64UserDataResource := fi.WrapResource(fi.NewStringResource(b64d))
+		if d != nil {
+			if featureflag.Terraform012.Enabled() {
+				userDataResource := fi.WrapResource(fi.NewBytesResource(d))
 
-			tf.UserData, err = target.AddFile("aws_launch_template", fi.StringValue(e.Name), "user_data", b64UserDataResource)
-			if err != nil {
-				return err
+				tf.UserData, err = target.AddFile("aws_launch_template", fi.StringValue(e.Name), "user_data", userDataResource, true)
+				if err != nil {
+					return err
+				}
+			} else {
+				b64d := base64.StdEncoding.EncodeToString(d)
+				if b64d != "" {
+					b64UserDataResource := fi.WrapResource(fi.NewStringResource(b64d))
+					tf.UserData, err = target.AddFile("aws_launch_template", fi.StringValue(e.Name), "user_data", b64UserDataResource, false)
+					if err != nil {
+						return err
+					}
+				}
 			}
 		}
 	}

@@ -455,6 +455,9 @@ type KubeAPIServerConfig struct {
 	// in "iss" claim of issued tokens. This value is a string or URI.
 	ServiceAccountIssuer *string `json:"serviceAccountIssuer,omitempty" flag:"service-account-issuer"`
 
+	// ServiceAccountJWKSURI overrides the path for the jwks document; this is useful when we are republishing the service account discovery information elsewhere.
+	ServiceAccountJWKSURI *string `json:"serviceAccountJWKSURI,omitempty" flag:"service-account-jwks-uri"`
+
 	// Identifiers of the API. The service account token authenticator will validate that
 	// tokens used against the API are bound to at least one of these audiences. If the
 	// --service-account-issuer flag is configured and this flag is not, this field
@@ -507,6 +510,9 @@ type KubeControllerManagerConfig struct {
 	// AttachDetachReconcileSyncPeriod is the amount of time the reconciler sync states loop
 	// wait between successive executions. Is set to 1 min by kops by default
 	AttachDetachReconcileSyncPeriod *metav1.Duration `json:"attachDetachReconcileSyncPeriod,omitempty" flag:"attach-detach-reconcile-sync-period"`
+	// DisableAttachDetachReconcileSync disables the reconcile sync loop in the attach-detach controller.
+	// This can cause volumes to become mismatched with pods
+	DisableAttachDetachReconcileSync *bool `json:"disableAttachDetachReconcileSync,omitempty" flag:"disable-attach-detach-reconcile-sync"`
 	// TerminatedPodGCThreshold is the number of terminated pods that can exist
 	// before the terminated pod garbage collector starts deleting terminated pods.
 	// If <= 0, the terminated pod garbage collector is disabled.
@@ -709,16 +715,24 @@ type CloudConfiguration struct {
 	Multizone          *bool   `json:"multizone,omitempty"`
 	NodeTags           *string `json:"nodeTags,omitempty"`
 	NodeInstancePrefix *string `json:"nodeInstancePrefix,omitempty"`
+	// GCEServiceAccount specifies the service account with which the GCE VM runs
+	GCEServiceAccount string `json:"gceServiceAccount,omitempty"`
 	// AWS cloud-config options
 	DisableSecurityGroupIngress *bool   `json:"disableSecurityGroupIngress,omitempty"`
 	ElbSecurityGroup            *string `json:"elbSecurityGroup,omitempty"`
-	// vSphere cloud-config specs
-	VSphereUsername      *string `json:"vSphereUsername,omitempty"`
-	VSpherePassword      *string `json:"vSpherePassword,omitempty"`
-	VSphereServer        *string `json:"vSphereServer,omitempty"`
-	VSphereDatacenter    *string `json:"vSphereDatacenter,omitempty"`
-	VSphereResourcePool  *string `json:"vSphereResourcePool,omitempty"`
-	VSphereDatastore     *string `json:"vSphereDatastore,omitempty"`
+	// VSphereUsername is deprecated and will be removed in a later version
+	VSphereUsername *string `json:"vSphereUsername,omitempty"`
+	// VSpherePassword is deprecated and will be removed in a later version
+	VSpherePassword *string `json:"vSpherePassword,omitempty"`
+	// VSphereServer is deprecated and will be removed in a later version
+	VSphereServer *string `json:"vSphereServer,omitempty"`
+	// VShpereDatacenter is deprecated and will be removed in a later version
+	VSphereDatacenter *string `json:"vSphereDatacenter,omitempty"`
+	// VSphereResourcePool is deprecated and will be removed in a later version
+	VSphereResourcePool *string `json:"vSphereResourcePool,omitempty"`
+	// VSphereDatastore is deprecated and will be removed in a later version
+	VSphereDatastore *string `json:"vSphereDatastore,omitempty"`
+	// VSphereCoreDNSServer is deprecated and will be removed in a later version
 	VSphereCoreDNSServer *string `json:"vSphereCoreDNSServer,omitempty"`
 	// Spotinst cloud-config specs
 	SpotinstProduct     *string `json:"spotinstProduct,omitempty"`

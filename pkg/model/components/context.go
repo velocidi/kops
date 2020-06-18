@@ -51,13 +51,6 @@ func (c *OptionsContext) IsKubernetesLT(version string) bool {
 	return !c.IsKubernetesGTE(version)
 }
 
-// Architecture returns the architecture we are using
-// We currently only support amd64, and we probably need to pass the InstanceGroup in
-// But we can start collecting the architectural dependencies
-func (c *OptionsContext) Architecture() string {
-	return "amd64"
-}
-
 // KubernetesVersion parses the semver version of kubernetes, from the cluster spec
 // Deprecated: prefer using OptionsContext.KubernetesVersion
 func KubernetesVersion(clusterSpec *kops.ClusterSpec) (*semver.Version, error) {
@@ -76,26 +69,31 @@ func KubernetesVersion(clusterSpec *kops.ClusterSpec) (*semver.Version, error) {
 }
 
 // UsesKubenet returns true if our networking is derived from kubenet
-func UsesKubenet(clusterSpec *kops.ClusterSpec) (bool, error) {
-	networking := clusterSpec.Networking
-	if networking == nil || networking.Classic != nil {
-		return false, nil
-	} else if networking.Kubenet != nil {
-		return true, nil
+func UsesKubenet(networking *kops.NetworkingSpec) bool {
+	if networking == nil {
+		panic("no networking mode set")
+	}
+	if networking.Kubenet != nil {
+		return true
 	} else if networking.GCE != nil {
 		// GCE IP Alias networking is based on kubenet
-		return true, nil
+		return true
 	} else if networking.External != nil {
 		// external is based on kubenet
-		return true, nil
-	} else if networking.CNI != nil || networking.Weave != nil || networking.Flannel != nil || networking.Calico != nil || networking.Canal != nil || networking.Kuberouter != nil || networking.Romana != nil || networking.AmazonVPC != nil || networking.Cilium != nil || networking.LyftVPC != nil {
-		return false, nil
+		return true
 	} else if networking.Kopeio != nil {
 		// Kopeio is based on kubenet / external
-		return true, nil
-	} else {
-		return false, fmt.Errorf("no networking mode set")
+		return true
 	}
+
+	return false
+
+}
+
+// UsesCNI returns true if the networking provider is a CNI plugin
+func UsesCNI(networking *kops.NetworkingSpec) bool {
+	// Kubenet and CNI are the only kubelet networking plugins right now.
+	return !UsesKubenet(networking)
 }
 
 func WellKnownServiceIP(clusterSpec *kops.ClusterSpec, id int) (net.IP, error) {
@@ -135,7 +133,7 @@ func IsBaseURL(kubernetesVersion string) bool {
 }
 
 // Image returns the docker image name for the specified component
-func Image(component string, architecture string, clusterSpec *kops.ClusterSpec, assetsBuilder *assets.AssetBuilder) (string, error) {
+func Image(component string, clusterSpec *kops.ClusterSpec, assetsBuilder *assets.AssetBuilder) (string, error) {
 	if assetsBuilder == nil {
 		return "", fmt.Errorf("unable to parse assets as assetBuilder is not defined")
 	}
@@ -171,13 +169,13 @@ func Image(component string, architecture string, clusterSpec *kops.ClusterSpec,
 	//
 	// But ... this is only the case from 1.16 on...
 	if kubernetesVersion.IsGTE("1.16") {
-		imageName += "-" + architecture
+		imageName += "-amd64"
 	}
 
 	baseURL := clusterSpec.KubernetesVersion
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	tagURL := baseURL + "/bin/linux/" + architecture + "/" + component + ".docker_tag"
+	tagURL := baseURL + "/bin/linux/amd64/" + component + ".docker_tag"
 	klog.V(2).Infof("Downloading docker tag for %s from: %s", component, tagURL)
 
 	b, err := vfs.Context.ReadFile(tagURL)
@@ -188,15 +186,6 @@ func Image(component string, architecture string, clusterSpec *kops.ClusterSpec,
 	klog.V(2).Infof("Found tag %q for %q", tag, component)
 
 	image := "k8s.gcr.io/" + imageName + ":" + tag
-
-	// When we're using a docker load-ed image, we are likely a CI build.
-	// But the k8s.gcr.io prefix is an alias, and we only double-tagged from 1.10 onwards.
-	// For versions prior to 1.10, remap k8s.gcr.io to the old name.
-	// This also means that we won't start using the aliased names on existing clusters,
-	// which could otherwise be surprising to users.
-	if !kubernetesVersion.IsGTE("1.10") {
-		image = "gcr.io/google_containers/" + strings.TrimPrefix(image, "k8s.gcr.io/")
-	}
 
 	return image, nil
 }

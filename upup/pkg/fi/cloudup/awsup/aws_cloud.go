@@ -155,6 +155,9 @@ type AWSCloud interface {
 	// DefaultInstanceType determines a suitable instance type for the specified instance group
 	DefaultInstanceType(cluster *kops.Cluster, ig *kops.InstanceGroup) (string, error)
 
+	// DescribeInstanceType calls ec2.DescribeInstanceType to get information for a particular instance type
+	DescribeInstanceType(instanceType string) (*ec2.InstanceTypeInfo, error)
+
 	// FindClusterStatus gets the status of the cluster as it exists in AWS, inferred from volumes
 	FindClusterStatus(cluster *kops.Cluster) (*kops.ClusterStatus, error)
 }
@@ -174,11 +177,18 @@ type awsCloudImplementation struct {
 	tags map[string]string
 
 	regionDelayers *RegionDelayers
+
+	instanceTypes *instanceTypes
 }
 
 type RegionDelayers struct {
 	mutex      sync.Mutex
 	delayerMap map[string]*k8s_aws.CrossRequestRetryDelay
+}
+
+type instanceTypes struct {
+	mutex   sync.Mutex
+	typeMap map[string]*ec2.InstanceTypeInfo
 }
 
 var _ fi.Cloud = &awsCloudImplementation{}
@@ -200,6 +210,9 @@ func NewAWSCloud(region string, tags map[string]string) (AWSCloud, error) {
 			region: region,
 			regionDelayers: &RegionDelayers{
 				delayerMap: make(map[string]*k8s_aws.CrossRequestRetryDelay),
+			},
+			instanceTypes: &instanceTypes{
+				typeMap: make(map[string]*ec2.InstanceTypeInfo),
 			},
 		}
 
@@ -344,6 +357,12 @@ func NewEC2Filter(name string, values ...string) *ec2.Filter {
 // DeleteGroup deletes an aws autoscaling group
 func (c *awsCloudImplementation) DeleteGroup(g *cloudinstances.CloudInstanceGroup) error {
 	if c.spotinst != nil {
+		if featureflag.SpotinstHybrid.Enabled() {
+			if _, ok := g.Raw.(*autoscaling.Group); ok {
+				return deleteGroup(c, g)
+			}
+		}
+
 		return spotinst.DeleteInstanceGroup(c.spotinst, g)
 	}
 
@@ -425,6 +444,12 @@ func deleteGroup(c AWSCloud, g *cloudinstances.CloudInstanceGroup) error {
 // DeleteInstance deletes an aws instance
 func (c *awsCloudImplementation) DeleteInstance(i *cloudinstances.CloudInstanceGroupMember) error {
 	if c.spotinst != nil {
+		if featureflag.SpotinstHybrid.Enabled() {
+			if _, ok := i.CloudInstanceGroup.Raw.(*autoscaling.Group); ok {
+				return deleteInstance(c, i)
+			}
+		}
+
 		return spotinst.DeleteInstance(c.spotinst, i)
 	}
 
@@ -490,8 +515,23 @@ func detachInstance(c AWSCloud, i *cloudinstances.CloudInstanceGroupMember) erro
 // GetCloudGroups returns a groups of instances that back a kops instance groups
 func (c *awsCloudImplementation) GetCloudGroups(cluster *kops.Cluster, instancegroups []*kops.InstanceGroup, warnUnmatched bool, nodes []v1.Node) (map[string]*cloudinstances.CloudInstanceGroup, error) {
 	if c.spotinst != nil {
-		return spotinst.GetCloudGroups(c.spotinst, cluster,
-			instancegroups, warnUnmatched, nodes)
+		sgroups, err := spotinst.GetCloudGroups(c.spotinst, cluster, instancegroups, warnUnmatched, nodes)
+		if err != nil {
+			return nil, err
+		}
+
+		if featureflag.SpotinstHybrid.Enabled() {
+			agroups, err := getCloudGroups(c, cluster, instancegroups, warnUnmatched, nodes)
+			if err != nil {
+				return nil, err
+			}
+
+			for name, group := range agroups {
+				sgroups[name] = group
+			}
+		}
+
+		return sgroups, nil
 	}
 
 	return getCloudGroups(c, cluster, instancegroups, warnUnmatched, nodes)
@@ -713,6 +753,7 @@ func awsBuildCloudInstanceGroup(c AWSCloud, cluster *kops.Cluster, ig *kops.Inst
 		HumanName:     aws.StringValue(g.AutoScalingGroupName),
 		InstanceGroup: ig,
 		MinSize:       int(aws.Int64Value(g.MinSize)),
+		TargetSize:    int(aws.Int64Value(g.DesiredCapacity)),
 		MaxSize:       int(aws.Int64Value(g.MaxSize)),
 		Raw:           g,
 	}
@@ -1508,4 +1549,34 @@ func (c *awsCloudImplementation) zonesWithInstanceType(instanceType string) (set
 	}
 
 	return zones, nil
+}
+
+// DescribeInstanceType calls ec2.DescribeInstanceType to get information for a particular instance type
+func (c *awsCloudImplementation) DescribeInstanceType(instanceType string) (*ec2.InstanceTypeInfo, error) {
+	if info, ok := c.instanceTypes.typeMap[instanceType]; ok {
+		return info, nil
+	}
+	c.instanceTypes.mutex.Lock()
+	defer c.instanceTypes.mutex.Unlock()
+
+	info, err := describeInstanceType(c, instanceType)
+	if err != nil {
+		return nil, err
+	}
+	c.instanceTypes.typeMap[instanceType] = info
+	return info, nil
+}
+
+func describeInstanceType(c AWSCloud, instanceType string) (*ec2.InstanceTypeInfo, error) {
+	req := &ec2.DescribeInstanceTypesInput{
+		InstanceTypes: aws.StringSlice([]string{instanceType}),
+	}
+	resp, err := c.EC2().DescribeInstanceTypes(req)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.InstanceTypes) != 1 {
+		return nil, fmt.Errorf("invalid instance type specified: %v", instanceType)
+	}
+	return resp.InstanceTypes[0], nil
 }

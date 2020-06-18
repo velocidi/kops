@@ -1108,6 +1108,11 @@ func (in *DockerConfig) DeepCopyInto(out *DockerConfig) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.SelinuxEnabled != nil {
+		in, out := &in.SelinuxEnabled, &out.SelinuxEnabled
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Storage != nil {
 		in, out := &in.Storage, &out.Storage
 		*out = new(string)
@@ -1797,6 +1802,11 @@ func (in *InstanceGroupSpec) DeepCopyInto(out *InstanceGroupSpec) {
 		*out = new(RollingUpdate)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.InstanceInterruptionBehavior != nil {
+		in, out := &in.InstanceInterruptionBehavior, &out.InstanceInterruptionBehavior
+		*out = new(string)
+		**out = **in
+	}
 	return
 }
 
@@ -2248,6 +2258,11 @@ func (in *KubeAPIServerConfig) DeepCopyInto(out *KubeAPIServerConfig) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.ServiceAccountJWKSURI != nil {
+		in, out := &in.ServiceAccountJWKSURI, &out.ServiceAccountJWKSURI
+		*out = new(string)
+		**out = **in
+	}
 	if in.APIAudiences != nil {
 		in, out := &in.APIAudiences, &out.APIAudiences
 		*out = make([]string, len(*in))
@@ -2317,6 +2332,11 @@ func (in *KubeControllerManagerConfig) DeepCopyInto(out *KubeControllerManagerCo
 	if in.AttachDetachReconcileSyncPeriod != nil {
 		in, out := &in.AttachDetachReconcileSyncPeriod, &out.AttachDetachReconcileSyncPeriod
 		*out = new(v1.Duration)
+		**out = **in
+	}
+	if in.DisableAttachDetachReconcileSync != nil {
+		in, out := &in.DisableAttachDetachReconcileSync, &out.DisableAttachDetachReconcileSync
+		*out = new(bool)
 		**out = **in
 	}
 	if in.TerminatedPodGCThreshold != nil {
