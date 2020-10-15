@@ -229,10 +229,11 @@ metadata:
 data:
   # use-proxy-protocol: "true" # NOTICE: custom change for Velocidi
   use-proxy-protocol: "false" # NOTICE: custom change for Velocidi
-  # NOTICE: The following 3 parameters are not in upstream
+  # NOTICE: The following 4 parameters are not in upstream
   client-body-buffer-size: "16k"
   proxy-connect-timeout: "60"
   proxy-body-size: "10m"
+  retry-non-idempotent: "true"
 
 ---
 
